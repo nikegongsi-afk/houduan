@@ -6,6 +6,7 @@ const { toCountryZh, enrichVisitLocationZh } = require('../config/visitLocationZ
 
 const displayVisit = (visit) => ({
   ...visit,
+  visitor_label: visit.visitor_label || '游客',
   country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
   city: visit.city_zh || visit.city || '',
 });
