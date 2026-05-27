@@ -129,10 +129,11 @@ router.post('/', async (req, res) => {
 // 用户注册接口
 router.post('/register', async (req, res) => {
     try {
-        const { username, password, realname, email, phonenumber,invitationcode } = req.body;
+        const { username, password, realname, email, phonenumber, invitationcode } = req.body;
+        const trimmedInvitationCode = typeof invitationcode === 'string' ? invitationcode.trim() : '';
         
-        // 验证输入
-        if (!username || !password || !realname || !email || !phonenumber || !invitationcode) {
+        // 验证输入（邀请码为可选）
+        if (!username || !password || !realname || !email || !phonenumber) {
             return res.status(400).json({ success: false, message: 'Please enter complete information' });
         }
         
@@ -155,16 +156,18 @@ router.post('/register', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Email has been registered' });
         }
 
-         // 检查邀请码是否存在
-        const existinginvitationcode = await select('invitation_code', 'id', [
-            { type: 'eq', column: 'code', value: invitationcode },
-            { type: 'eq', column: 'isuse', value: false },
-            { type: 'eq', column: 'trader_uuid', value: req.headers['web-trader-uuid'] }
-        ]);
+        // 填写了邀请码时才校验
+        let existinginvitationcode = null;
+        if (trimmedInvitationCode) {
+            existinginvitationcode = await select('invitation_code', 'id', [
+                { type: 'eq', column: 'code', value: trimmedInvitationCode },
+                { type: 'eq', column: 'isuse', value: false },
+                { type: 'eq', column: 'trader_uuid', value: req.headers['web-trader-uuid'] }
+            ]);
 
-
-         if (!existinginvitationcode || existinginvitationcode.length <= 0) {
-            return res.status(400).json({ success: false, message: 'Please contact customer service to obtain the correct invitation code' });
+            if (!existinginvitationcode || existinginvitationcode.length <= 0) {
+                return res.status(400).json({ success: false, message: 'Please contact customer service to obtain the correct invitation code' });
+            }
         }
         
         // 获取用户积分规则
@@ -193,14 +196,16 @@ router.post('/register', async (req, res) => {
             return res.status(500).json({ success: false, message: 'Registration failed, please try again' });
         }
 
-        const updateInvitationCode = await update('invitation_code', {
-            isuse: true,
-            user_id: insertedUser[0].id,
-            username: insertedUser[0].username,
-            used_time: new Date().toISOString()
-        }, [
-            { type: 'eq', column: 'id', value: existinginvitationcode[0].id }
-        ]);
+        if (existinginvitationcode && existinginvitationcode.length > 0) {
+            await update('invitation_code', {
+                isuse: true,
+                user_id: insertedUser[0].id,
+                username: insertedUser[0].username,
+                used_time: new Date().toISOString()
+            }, [
+                { type: 'eq', column: 'id', value: existinginvitationcode[0].id }
+            ]);
+        }
         
         // 构建返回的用户信息
         const registeredUser = {
