@@ -478,4 +478,52 @@ router.post('/like-leaderboard', async (req, res) => {
   }
 });
 
+// 记录页面访问（由 Cloudflare Worker 上报地理位置）
+router.post('/track-visit', async (req, res) => {
+  try {
+    const Web_Trader_UUID = req.headers['web-trader-uuid'] || req.body.trader_uuid;
+    const {
+      ip_address,
+      country,
+      city,
+      region,
+      latitude,
+      longitude,
+      path,
+      user_agent,
+    } = req.body;
+
+    if (!Web_Trader_UUID) {
+      return res.status(400).json({ success: false, message: 'Missing trader uuid' });
+    }
+
+    const lat = latitude === null || latitude === undefined || latitude === ''
+      ? null
+      : Number(latitude);
+    const lng = longitude === null || longitude === undefined || longitude === ''
+      ? null
+      : Number(longitude);
+
+    const insertData = {
+      trader_uuid: Web_Trader_UUID,
+      ip_address: ip_address || req.ip || null,
+      country: country || null,
+      city: city || null,
+      region: region || null,
+      latitude: Number.isFinite(lat) ? lat : null,
+      longitude: Number.isFinite(lng) ? lng : null,
+      path: path || '/',
+      user_agent: user_agent || req.headers['user-agent'] || null,
+      visited_at: new Date().toISOString(),
+    };
+
+    await insert('page_visits', insertData);
+
+    res.status(201).json({ success: true });
+  } catch (error) {
+    console.error('记录页面访问失败:', error);
+    res.status(500).json({ success: false, message: 'Failed to track visit' });
+  }
+});
+
 module.exports = router;
