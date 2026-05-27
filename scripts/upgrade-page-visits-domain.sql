@@ -1,6 +1,8 @@
--- 为 page_visits 增加域名字段，并允许更新（同一 IP 只保留一条记录）
+-- 为 page_visits 增加域名字段与中文字段
 ALTER TABLE page_visits ADD COLUMN IF NOT EXISTS visit_host TEXT;
 ALTER TABLE page_visits ADD COLUMN IF NOT EXISTS visit_url TEXT;
+ALTER TABLE page_visits ADD COLUMN IF NOT EXISTS country_zh TEXT;
+ALTER TABLE page_visits ADD COLUMN IF NOT EXISTS city_zh TEXT;
 
 DROP POLICY IF EXISTS "page_visits_update" ON page_visits;
 CREATE POLICY "page_visits_update" ON page_visits

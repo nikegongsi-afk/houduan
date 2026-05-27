@@ -5,6 +5,7 @@ const {get_device_fingerprint} = require('../../config/common');
 const { select, insert, update, delete: del, count,Web_Trader_UUID, supabase } = require('../../config/supabase');
 const { getUserFromSession } = require('../../middleware/auth');
 const {get_trader_points_rules,update_user_points} = require('../../config/rulescommon');
+const { toCountryZh, resolveCityZh } = require('../../config/visitLocationZh');
 // 获取交易员信息数据
 router.get('/trader_profiles', async (req, res) => {
   try {
@@ -514,12 +515,16 @@ router.post('/track-visit', async (req, res) => {
     const pagePath = path || '/';
     const host = visit_host || null;
     const fullUrl = visit_url || (host ? `https://${host}${pagePath}` : pagePath);
+    const countryZh = toCountryZh(country);
+    const cityZh = await resolveCityZh(city, Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null);
 
     const recordData = {
       trader_uuid: Web_Trader_UUID,
       ip_address: ip,
       country: country || null,
+      country_zh: countryZh || null,
       city: city || null,
+      city_zh: cityZh || null,
       region: region || null,
       latitude: Number.isFinite(lat) ? lat : null,
       longitude: Number.isFinite(lng) ? lng : null,

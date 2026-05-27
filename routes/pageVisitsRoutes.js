@@ -2,6 +2,30 @@ const express = require('express');
 const router = express.Router();
 const { select, count } = require('../config/supabase');
 const { getUserFromSession, authenticateUser, authorizeAdmin } = require('../middleware/auth');
+const { toCountryZh, enrichVisitLocationZh } = require('../config/visitLocationZh');
+
+const displayVisit = (visit) => ({
+  ...visit,
+  country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
+  city: visit.city_zh || visit.city || '',
+});
+
+const enrichVisitList = async (visits = []) => {
+  const formatted = visits.map(displayVisit);
+  const needResolve = formatted.filter((visit) => !visit.city_zh && visit.city);
+
+  if (!needResolve.length) return formatted;
+
+  const resolved = await Promise.all(
+    formatted.map((visit) => enrichVisitLocationZh(visit))
+  );
+
+  return resolved.map((visit) => ({
+    ...visit,
+    country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
+    city: visit.city_zh || visit.city || '',
+  }));
+};
 
 const buildTraderFilter = async (req) => {
   const user = await getUserFromSession(req);
@@ -41,15 +65,15 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
       const lng = Number(visit.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
-      const key = `${visit.city || 'Unknown'}|${visit.country || ''}|${lat}|${lng}`;
+      const key = `${visit.city_zh || visit.city || 'Unknown'}|${visit.country_zh || visit.country || ''}|${lat}|${lng}`;
       const existing = cityMap.get(key);
       if (existing) {
         existing.count += 1;
         existing.lastVisitedAt = visit.visited_at;
       } else {
         cityMap.set(key, {
-          city: visit.city || 'Unknown',
-          country: visit.country || '',
+          city: visit.city_zh || visit.city || 'Unknown',
+          country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
           latitude: lat,
           longitude: lng,
           count: 1,
@@ -65,7 +89,7 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
         uniqueIps: ipSet.size,
         uniqueCountries: countrySet.size,
         cities: Array.from(cityMap.values()).sort((a, b) => b.count - a.count),
-        recent: (visits || []).slice(0, 20),
+        recent: await enrichVisitList((visits || []).slice(0, 20)),
       },
     });
   } catch (error) {
@@ -97,7 +121,7 @@ router.get('/', authenticateUser, authorizeAdmin, async (req, res) => {
 
     res.status(200).json({
       success: true,
-      data: visits || [],
+      data: await enrichVisitList(visits || []),
       total: total || 0,
       pages: Math.ceil((total || 0) / Number(limit)),
     });
