@@ -532,7 +532,6 @@ router.post('/track-visit', async (req, res) => {
       visit_host: host,
       visit_url: fullUrl,
       visitor_label: '游客',
-      user_id: null,
       user_agent: user_agent || req.headers['user-agent'] || null,
       visited_at: new Date().toISOString(),
     };
@@ -585,7 +584,6 @@ router.post('/identify-visit', async (req, res) => {
 
     const user = await getUserFromSession(req);
     const visitorLabel = user?.username || '游客';
-    const userId = user?.id || null;
 
     const existingConditions = [
       { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID },
@@ -603,7 +601,6 @@ router.post('/identify-visit', async (req, res) => {
     if (existing && existing.length > 0) {
       await update('page_visits', {
         visitor_label: visitorLabel,
-        user_id: userId,
         visited_at: new Date().toISOString(),
       }, [{ type: 'eq', column: 'id', value: existing[0].id }]);
 
@@ -621,7 +618,11 @@ router.post('/identify-visit', async (req, res) => {
     });
   } catch (error) {
     console.error('识别访客身份失败:', error);
-    res.status(500).json({ success: false, message: 'Failed to identify visit user' });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to identify visit user',
+      details: error.message,
+    });
   }
 });
 
