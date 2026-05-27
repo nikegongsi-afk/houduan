@@ -89,13 +89,11 @@ router.get('/VipDashboardData', async (req, res) => {
     // 为VIP交易记录添加实时价格获取
     const { get_real_time_price } = require('../../config/common');
     for (const trade of vip_trade_list) {
-      // 如果没有current_price或为0，实时获取价格
-      if (!trade.current_price || trade.current_price === 0) {
+      if (!trade.exit_price && !trade.exit_date) {
         try {
           const latest_price = await get_real_time_price(trade.trade_market, trade.symbol);
-          if (latest_price) {
+          if (latest_price && latest_price > 0) {
             trade.current_price = latest_price;
-            // 更新数据库中的价格
             await update('vip_trades', {
               current_price: latest_price,
               updated_at: new Date().toISOString()
@@ -514,23 +512,27 @@ router.post('/startquestions', async (req, res) => {
 // 获取股票价格数据
 router.post('/stock-prices', async (req, res) => {
   try {
-    const Web_Trader_UUID = req.headers['web-trader-uuid'];
-    const { symbols } = req.body;
-    
+    const { symbols, trade_market = 'US' } = req.body;
+
     if (!symbols || !Array.isArray(symbols)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: 'Symbols array is required' 
+      return res.status(400).json({
+        success: false,
+        message: 'Symbols array is required'
       });
     }
 
-    // 模拟股票价格数据
-    const stockPrices = symbols.map(symbol => ({
-      symbol: symbol,
-      price: (Math.random() * 100 + 10).toFixed(2),
-      change: (Math.random() * 10 - 5).toFixed(2),
-      changePercent: (Math.random() * 10 - 5).toFixed(2)
-    }));
+    const { get_real_time_price } = require('../../config/common');
+    const stockPrices = [];
+
+    for (const symbol of symbols) {
+      const price = await get_real_time_price(trade_market, symbol);
+      stockPrices.push({
+        symbol,
+        price: price ?? null,
+        change: null,
+        changePercent: null
+      });
+    }
 
     res.status(200).json({
       success: true,

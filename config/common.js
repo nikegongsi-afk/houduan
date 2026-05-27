@@ -48,18 +48,36 @@ async function get_India_price() {
 }
 
 /**
+ * 统一交易市场标识（后台常见 US，Polygon 走 usa）
+ */
+function normalize_market(market) {
+  const value = String(market || '').trim().toLowerCase();
+  if (['usa', 'us', 'u.s.', 'united states', 'america', '美股', '美国'].includes(value)) {
+    return 'usa';
+  }
+  if (['india', 'in', 'ind', '印度'].includes(value)) {
+    return 'india';
+  }
+  return value;
+}
+
+/**
  * 获取实时股票价格
- * @param {string} market - 市场类型 (usa或其他)
+ * @param {string} market - 市场类型 (usa/us/印度等)
  * @param {string} symbol - 股票代码
- * @param {string} asset_type - 资产类型 (可选)
  * @returns {Promise<number|null>} - 实时价格或null
  */
-async function get_real_time_price(market, symbol, asset_type = null) {
-  symbol = String(symbol).toUpperCase().split(":")[0];
-  
-  if (market.toLowerCase() === "usa") {
+async function get_real_time_price(market, symbol) {
+  symbol = String(symbol).toUpperCase().split(':')[0];
+  const normalizedMarket = normalize_market(market);
+
+  if (normalizedMarket === 'usa') {
     // 获取美国股票价格
-    const api_key = "YIQDtez6a6OhyWsg2xtbRbOUp3Akhlp4";
+    const api_key = process.env.POLYGON_API_KEY;
+    if (!api_key) {
+      console.error('POLYGON_API_KEY 未配置');
+      return null;
+    }
     
     // 股票查法兜底：asset_type为stock或未传但symbol像股票代码
    
@@ -86,7 +104,7 @@ async function get_real_time_price(market, symbol, asset_type = null) {
     
     // 默认返回None
     return null;
-  } else {
+  } else if (normalizedMarket === 'india') {
     // 获取印度股票价格
     try {
       // 如果价格列表为空，尝试获取
@@ -101,6 +119,9 @@ async function get_real_time_price(market, symbol, asset_type = null) {
       return null;
     }
   }
+
+  console.warn(`Unknown trade market "${market}" for symbol ${symbol}`);
+  return null;
 }
 
 module.exports = {

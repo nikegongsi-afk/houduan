@@ -132,11 +132,10 @@ router.get('/asset-distribution', authenticateUser, authorizeAdmin, async (req, 
         
         // 资产区间分布
         const assetRanges = [
-            { min: 0, max: 50000, label: '0-100000' },
-          
+            { min: 0, max: 100000, label: '0-100000' },
             { min: 100000, max: 500000, label: '100000-500000' },
-            { min: 500000, max: 1000000, label: '500000-500000' },
-            { min: 1000000, max: Infinity, label: '500000+' }
+            { min: 500000, max: 1000000, label: '500000-1000000' },
+            { min: 1000000, max: Infinity, label: '1000000+' }
         ];
         
         const assetDistribution = [];

@@ -397,7 +397,7 @@ router.post('/adminlogin', async (req, res) => {
         const users = await select('users', '*', [
             { type: 'eq', column: 'username', value: username },
             { type: 'eq', column: 'password_hash', value: password_hash },
-            { type: 'eq', column: 'role', value: 'admin' }
+            { type: 'in', column: 'role', value: ['admin', 'superadmin'] }
         ]);
         console.log(users)
         // 检查用户是否存在且为管理员

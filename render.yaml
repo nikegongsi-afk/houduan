@@ -14,10 +14,12 @@ services:
       - key: SUPABASE_URL
         value: https://poqloztmhyznarxrpllr.supabase.co
       - key: Web_Trader_UUID
-        value: 39968c24-67bd-4f12-a5e4-ff959ce03c50
+        value: c5e01236-d681-4343-8386-f9e17748f81f
       - key: SUPABASE_KEY
         sync: false
       - key: OPENAI_API_KEY
+        sync: false
+      - key: POLYGON_API_KEY
         sync: false
       - key: SESSION_SECRET
         sync: false

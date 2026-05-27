@@ -93,21 +93,18 @@ router.get('/index', async (req, res) => {
         console.log('📊 重点交易记录数量:', importantCount);
       }
        
-      // 实时获取价格：如果 current_price 为 0 或 null，尝试实时获取
+      // 未平仓交易：始终拉取最新实时价格（避免 current_price=entry_price 时不更新）
       const { get_real_time_price } = require('../../config/common');
       for (const trade of trades) {
-        // 只处理未平仓且价格无效的交易
         if (!trade.exit_price && !trade.exit_date) {
-          if (!trade.current_price || trade.current_price === 0 || isNaN(trade.current_price)) {
-            try {
-              const latestPrice = await get_real_time_price(trade.trade_market, trade.symbol);
-              if (latestPrice && latestPrice > 0) {
-                trade.current_price = latestPrice;
-                console.log(`✅ 实时获取 ${trade.symbol} 价格: $${latestPrice}`);
-              }
-            } catch (error) {
-              console.error(`❌ 获取 ${trade.symbol} 价格失败:`, error.message);
+          try {
+            const latestPrice = await get_real_time_price(trade.trade_market, trade.symbol);
+            if (latestPrice && latestPrice > 0) {
+              trade.current_price = latestPrice;
+              console.log(`✅ 实时获取 ${trade.symbol} 价格: $${latestPrice}`);
             }
+          } catch (error) {
+            console.error(`❌ 获取 ${trade.symbol} 价格失败:`, error.message);
           }
         }
       }
