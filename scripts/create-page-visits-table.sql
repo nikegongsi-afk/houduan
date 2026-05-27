@@ -16,3 +16,17 @@ CREATE TABLE IF NOT EXISTS page_visits (
 CREATE INDEX IF NOT EXISTS idx_page_visits_trader_uuid ON page_visits (trader_uuid);
 CREATE INDEX IF NOT EXISTS idx_page_visits_visited_at ON page_visits (visited_at DESC);
 CREATE INDEX IF NOT EXISTS idx_page_visits_city ON page_visits (city);
+
+-- 允许后端 API 读写（Supabase 新建表默认开启 RLS，需显式放行）
+ALTER TABLE page_visits ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "page_visits_insert" ON page_visits;
+DROP POLICY IF EXISTS "page_visits_select" ON page_visits;
+
+CREATE POLICY "page_visits_insert" ON page_visits
+  FOR INSERT
+  WITH CHECK (true);
+
+CREATE POLICY "page_visits_select" ON page_visits
+  FOR SELECT
+  USING (true);
