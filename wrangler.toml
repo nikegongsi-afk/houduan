@@ -1,0 +1,27 @@
+# Cloudflare Workers - 后端 API 部署配置
+# 部署前请先登录: npx wrangler login
+
+name = "jack-ablin-api"
+main = "worker.mjs"
+compatibility_date = "2025-11-25"
+compatibility_flags = ["nodejs_compat", "enable_nodejs_http_server_modules"]
+
+# 首次部署可用 workers.dev 测试，确认无误后再绑定自定义域名
+workers_dev = true
+
+[vars]
+NODE_ENV = "production"
+PORT = "8787"
+DISABLE_SCHEDULER = "true"
+DISABLE_LOCAL_FS = "true"
+SUPABASE_URL = "https://poqloztmhyznarxrpllr.supabase.co"
+Web_Trader_UUID = "39968c24-67bd-4f12-a5e4-ff959ce03c50"
+
+# 以下敏感变量请在 Cloudflare Dashboard 或 CLI 中设置为 Secret，不要写进此文件：
+# SUPABASE_KEY
+# OPENAI_API_KEY
+# SESSION_SECRET
+
+[[routes]]
+pattern = "api.jack-ablin.com/*"
+zone_name = "jack-ablin.com"
