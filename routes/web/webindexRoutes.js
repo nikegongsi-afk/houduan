@@ -490,11 +490,18 @@ router.post('/track-visit', async (req, res) => {
       latitude,
       longitude,
       path,
+      visit_host,
+      visit_url,
       user_agent,
     } = req.body;
 
     if (!Web_Trader_UUID) {
       return res.status(400).json({ success: false, message: 'Missing trader uuid' });
+    }
+
+    const ip = ip_address || req.ip || null;
+    if (!ip) {
+      return res.status(400).json({ success: false, message: 'Missing ip address' });
     }
 
     const lat = latitude === null || latitude === undefined || latitude === ''
@@ -504,22 +511,47 @@ router.post('/track-visit', async (req, res) => {
       ? null
       : Number(longitude);
 
-    const insertData = {
+    const pagePath = path || '/';
+    const host = visit_host || null;
+    const fullUrl = visit_url || (host ? `https://${host}${pagePath}` : pagePath);
+
+    const recordData = {
       trader_uuid: Web_Trader_UUID,
-      ip_address: ip_address || req.ip || null,
+      ip_address: ip,
       country: country || null,
       city: city || null,
       region: region || null,
       latitude: Number.isFinite(lat) ? lat : null,
       longitude: Number.isFinite(lng) ? lng : null,
-      path: path || '/',
+      path: pagePath,
+      visit_host: host,
+      visit_url: fullUrl,
       user_agent: user_agent || req.headers['user-agent'] || null,
       visited_at: new Date().toISOString(),
     };
 
-    await insert('page_visits', insertData);
+    const existingConditions = [
+      { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID },
+      { type: 'eq', column: 'ip_address', value: ip },
+    ];
+    const existing = await select(
+      'page_visits',
+      '*',
+      existingConditions,
+      1,
+      0,
+      { column: 'visited_at', ascending: false }
+    );
 
-    res.status(201).json({ success: true });
+    if (existing && existing.length > 0) {
+      await update('page_visits', recordData, [
+        { type: 'eq', column: 'id', value: existing[0].id },
+      ]);
+      return res.status(200).json({ success: true, updated: true });
+    }
+
+    await insert('page_visits', recordData);
+    res.status(201).json({ success: true, created: true });
   } catch (error) {
     console.error('记录页面访问失败:', error);
     res.status(500).json({ success: false, message: 'Failed to track visit' });

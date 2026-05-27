@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS page_visits (
   latitude DOUBLE PRECISION,
   longitude DOUBLE PRECISION,
   path TEXT,
+  visit_host TEXT,
+  visit_url TEXT,
   user_agent TEXT,
   visited_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -22,6 +24,7 @@ ALTER TABLE page_visits ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "page_visits_insert" ON page_visits;
 DROP POLICY IF EXISTS "page_visits_select" ON page_visits;
+DROP POLICY IF EXISTS "page_visits_delete" ON page_visits;
 
 CREATE POLICY "page_visits_insert" ON page_visits
   FOR INSERT
@@ -30,3 +33,12 @@ CREATE POLICY "page_visits_insert" ON page_visits
 CREATE POLICY "page_visits_select" ON page_visits
   FOR SELECT
   USING (true);
+
+CREATE POLICY "page_visits_delete" ON page_visits
+  FOR DELETE
+  USING (true);
+
+CREATE POLICY "page_visits_update" ON page_visits
+  FOR UPDATE
+  USING (true)
+  WITH CHECK (true);
