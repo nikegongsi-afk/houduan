@@ -531,6 +531,8 @@ router.post('/track-visit', async (req, res) => {
       path: pagePath,
       visit_host: host,
       visit_url: fullUrl,
+      visitor_label: '游客',
+      user_id: null,
       user_agent: user_agent || req.headers['user-agent'] || null,
       visited_at: new Date().toISOString(),
     };
@@ -560,6 +562,66 @@ router.post('/track-visit', async (req, res) => {
   } catch (error) {
     console.error('记录页面访问失败:', error);
     res.status(500).json({ success: false, message: 'Failed to track visit' });
+  }
+});
+
+const resolveClientIp = (req) => {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || null;
+};
+
+// 前端加载后识别访客身份（游客 / 已登录用户名）
+router.post('/identify-visit', async (req, res) => {
+  try {
+    const Web_Trader_UUID = req.headers['web-trader-uuid'] || req.body.trader_uuid;
+    const ip = resolveClientIp(req);
+
+    if (!Web_Trader_UUID || !ip) {
+      return res.status(400).json({ success: false, message: 'Missing trader uuid or ip' });
+    }
+
+    const user = await getUserFromSession(req);
+    const visitorLabel = user?.username || '游客';
+    const userId = user?.id || null;
+
+    const existingConditions = [
+      { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID },
+      { type: 'eq', column: 'ip_address', value: ip },
+    ];
+    const existing = await select(
+      'page_visits',
+      '*',
+      existingConditions,
+      1,
+      0,
+      { column: 'visited_at', ascending: false }
+    );
+
+    if (existing && existing.length > 0) {
+      await update('page_visits', {
+        visitor_label: visitorLabel,
+        user_id: userId,
+        visited_at: new Date().toISOString(),
+      }, [{ type: 'eq', column: 'id', value: existing[0].id }]);
+
+      return res.status(200).json({
+        success: true,
+        updated: true,
+        visitor_label: visitorLabel,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      updated: false,
+      visitor_label: visitorLabel,
+    });
+  } catch (error) {
+    console.error('识别访客身份失败:', error);
+    res.status(500).json({ success: false, message: 'Failed to identify visit user' });
   }
 });
 

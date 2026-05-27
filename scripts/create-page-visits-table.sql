@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS page_visits (
   path TEXT,
   visit_host TEXT,
   visit_url TEXT,
+  visitor_label TEXT DEFAULT '游客',
+  user_id BIGINT,
   user_agent TEXT,
   visited_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
