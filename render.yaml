@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: houduan-api
+    runtime: node
+    plan: free
+    repo: https://github.com/nikegongsi-afk/houduan
+    branch: main
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SUPABASE_URL
+        value: https://poqloztmhyznarxrpllr.supabase.co
+      - key: Web_Trader_UUID
+        value: 39968c24-67bd-4f12-a5e4-ff959ce03c50
+      - key: SUPABASE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
