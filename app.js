@@ -33,7 +33,13 @@ app.use(session({
   }
 }));
 
-app.use('/api', userRateLimit());
+// 上传接口不参与限流（大文件上传耗时较长）
+app.use('/api', (req, res, next) => {
+  if (req.path.startsWith('/upload')) {
+    return next();
+  }
+  return userRateLimit()(req, res, next);
+});
 
 if (process.env.NODE_ENV === 'development') {
   app.use('/api/static', express.static(path.join(__dirname, 'public')));

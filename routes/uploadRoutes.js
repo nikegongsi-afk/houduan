@@ -4,142 +4,133 @@ const multer = require('multer');
 const { v4: uuidv4 } = require('uuid');
 const { uploadFile } = require('../config/supabase');
 
-// 配置内存存储引擎
+const VIDEO_MIME_TYPES = new Set([
+  'video/mp4',
+  'video/quicktime',
+  'video/x-msvideo',
+  'video/x-matroska',
+  'video/webm',
+  'video/avi',
+  'video/mov',
+  'video/mkv',
+]);
+
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/x-rar-compressed',
+  'application/vnd.rar',
+  'application/octet-stream',
+]);
+
+const VIDEO_EXTENSIONS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm']);
+const DOCUMENT_EXTENSIONS = new Set(['pdf', 'doc', 'docx', 'xls', 'xlsx', 'zip', 'rar']);
+
+const getExtension = (filename = '') => {
+  const parts = filename.split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : '';
+};
+
+const isAllowedUpload = (req, file) => {
+  const ext = getExtension(file.originalname);
+  const url = req.originalUrl || '';
+
+  if (url.includes('/images')) {
+    return file.mimetype.startsWith('image/');
+  }
+
+  if (url.includes('/videos')) {
+    return VIDEO_MIME_TYPES.has(file.mimetype) || VIDEO_EXTENSIONS.has(ext);
+  }
+
+  if (url.includes('/documents')) {
+    return DOCUMENT_MIME_TYPES.has(file.mimetype) || DOCUMENT_EXTENSIONS.has(ext);
+  }
+
+  return false;
+};
+
 const storage = multer.memoryStorage();
 
-// 创建multer实例
 const upload = multer({
-  storage: storage,
+  storage,
   limits: {
-    fileSize: 100 * 1024 * 1024, // 限制文件大小为100MB
+    fileSize: 200 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
-    // 检查文件类型是否在允许的范围内
-    let allowedTypes = [];
-    
-    if (req.originalUrl.includes('images')) {
-      allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    } else if (req.originalUrl.includes('videos')) {
-      allowedTypes = ['video/mp4', 'video/mov', 'video/avi', 'video/mkv', 'video/webm'];
-    } else if (req.originalUrl.includes('documents')) {
-      allowedTypes = [
-        'application/pdf',
-        'application/msword',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/zip',
-        'application/x-rar-compressed'
-      ];
-    }
-    
-    if (allowedTypes.includes(file.mimetype)) {
+    if (isAllowedUpload(req, file)) {
       cb(null, true);
-    } else {
-      cb(new Error('不支持的文件类型'));
+      return;
     }
+    cb(new Error('不支持的文件类型'));
   }
 });
 
-// 图片上传接口
-router.post('/images', upload.single('file'), async (req, res) => {
+const buildUploadResponse = (req, result, fileName) => ({
+  success: true,
+  data: {
+    url: result.url,
+    path: result.path,
+    fileName,
+    originalName: req.file.originalname,
+    mimeType: req.file.mimetype,
+    size: req.file.size
+  }
+});
+
+const handleSingleUpload = (bucketName) => async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: '没有文件被上传' });
+      return res.status(400).json({ success: false, error: '没有文件被上传' });
     }
-    
-    // 生成唯一的文件名
-    const fileExtension = req.file.originalname.split('.').pop();
+
+    const fileExtension = getExtension(req.file.originalname) || 'bin';
     const fileName = `${uuidv4()}.${fileExtension}`;
-    
-    // 上传文件到Supabase存储
-    const result = await uploadFile('images', fileName, req.file.buffer, req.file.mimetype);
-    
-    // 返回文件URL和其他信息
-    res.status(201).json({
-      success: true,
-      data: {
-        url: result.url,
-        path: result.path,
-        fileName: fileName,
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size
-      }
-    });
+    const result = await uploadFile(bucketName, fileName, req.file.buffer, req.file.mimetype);
+
+    res.status(201).json(buildUploadResponse(req, result, fileName));
   } catch (error) {
-    console.error('图片上传失败:', error);
+    console.error(`${bucketName} 上传失败:`, error);
     res.status(500).json({
       success: false,
-      error: '图片上传失败',
+      error: `${bucketName} 上传失败`,
       details: error.message
     });
   }
-});
+};
 
-// 视频上传接口
-router.post('/videos', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: '没有文件被上传' });
-    }
-    
-    // 生成唯一的文件名
-    const fileExtension = req.file.originalname.split('.').pop();
-    const fileName = `${uuidv4()}.${fileExtension}`;
-    
-    // 上传文件到Supabase存储
-    const result = await uploadFile('videos', fileName, req.file.buffer, req.file.mimetype);
-    
-    // 返回文件URL和其他信息
-    res.status(201).json({
-      success: true,
-      data: {
-        url: result.url,
-        path: result.path,
-        fileName: fileName,
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size
-      }
-    });
-  } catch (error) {
-    console.error('视频上传失败:', error);
-    res.status(500).json({
-      success: false,
-      error: '视频上传失败',
-      details: error.message
-    });
-  }
-});
+router.post('/images', upload.single('file'), handleSingleUpload('images'));
+router.post('/videos', upload.single('file'), handleSingleUpload('videos'));
+router.post('/documents', upload.single('file'), handleSingleUpload('documents'));
 
-// 批量图片上传接口
 router.post('/images/batch', upload.array('files', 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ error: '没有文件被上传' });
+      return res.status(400).json({ success: false, error: '没有文件被上传' });
     }
-    
-    // 批量上传文件
+
     const uploadPromises = req.files.map(async (file) => {
-      const fileExtension = file.originalname.split('.').pop();
+      const fileExtension = getExtension(file.originalname) || 'bin';
       const fileName = `${uuidv4()}.${fileExtension}`;
-      
       const result = await uploadFile('images', fileName, file.buffer, file.mimetype);
-      
+
       return {
         url: result.url,
         path: result.path,
-        fileName: fileName,
+        fileName,
         originalName: file.originalname,
         mimeType: file.mimetype,
         size: file.size
       };
     });
-    
-    // 等待所有上传完成
+
     const results = await Promise.all(uploadPromises);
-    
+
     res.status(201).json({
       success: true,
       data: results,
@@ -155,40 +146,19 @@ router.post('/images/batch', upload.array('files', 10), async (req, res) => {
   }
 });
 
-// 文档文件上传接口
-router.post('/documents', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: '没有文件被上传' });
-    }
-    
-    // 生成唯一的文件名
-    const fileExtension = req.file.originalname.split('.').pop();
-    const fileName = `${uuidv4()}.${fileExtension}`;
-    
-    // 上传文件到Supabase存储
-    const result = await uploadFile('documents', fileName, req.file.buffer, req.file.mimetype);
-    
-    // 返回文件URL和其他信息
-    res.status(201).json({
-      success: true,
-      data: {
-        url: result.url,
-        path: result.path,
-        fileName: fileName,
-        originalName: req.file.originalname,
-        mimeType: req.file.mimetype,
-        size: req.file.size
-      }
-    });
-  } catch (error) {
-    console.error('文档文件上传失败:', error);
-    res.status(500).json({
+router.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({
       success: false,
-      error: '文档文件上传失败',
-      details: error.message
+      error: err.code === 'LIMIT_FILE_SIZE' ? '文件大小超过限制（最大 200MB）' : err.message
     });
   }
+
+  if (err && err.message === '不支持的文件类型') {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+
+  next(err);
 });
 
 module.exports = router;
