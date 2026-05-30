@@ -3,6 +3,30 @@ const router = express.Router();
 const { select, insert, update, delete: deleteData, count } = require('../config/supabase');
 const { getUserFromSession, checkUserRole, handleError, formatDatetime, authenticateUser, authorizeAdmin } = require('../middleware/auth');
 
+const DEFAULT_PARTNER_SECTION_TITLE = 'Partner Institutions';
+const LEGACY_PARTNER_SECTION_TITLES = new Set(['合作机构', '合作伙伴']);
+
+function normalizePartnerSectionTitle(title) {
+    const trimmed = String(title || '').trim();
+    if (!trimmed || LEGACY_PARTNER_SECTION_TITLES.has(trimmed)) {
+        return DEFAULT_PARTNER_SECTION_TITLE;
+    }
+    return trimmed;
+}
+
+function pickPartnerSectionTitle(...organizationLists) {
+    for (const organizations of organizationLists) {
+        if (!organizations?.length) continue;
+        for (const org of organizations) {
+            const trimmed = org.section_title?.trim();
+            if (trimmed && !LEGACY_PARTNER_SECTION_TITLES.has(trimmed)) {
+                return trimmed;
+            }
+        }
+    }
+    return DEFAULT_PARTNER_SECTION_TITLE;
+}
+
 // 获取合作单位列表（公开接口，不需要认证，根据Web-Trader-UUID过滤）
 router.get('/', async (req, res) => {
     try {
@@ -23,36 +47,13 @@ router.get('/', async (req, res) => {
         const organizations = await select('partner_organizations', '*', conditions, null, null, orderBy);
         
         // 获取标题（从该trader_uuid的所有组织中获取，包括不活跃的）
-        let sectionTitle = '合作机构';
+        let allOrganizations = [];
         if (Web_Trader_UUID) {
-            // 查询所有记录（包括不活跃的），按ID倒序，优先获取最新的
-            const allOrganizations = await select('partner_organizations', '*', [
+            allOrganizations = await select('partner_organizations', '*', [
                 { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID }
             ], null, null, { column: 'id', ascending: false });
-            
-            console.log('公开接口查询到的所有组织:', allOrganizations);
-            
-            // 查找第一个有标题的记录（从最新到最旧），排除默认值
-            if (allOrganizations && allOrganizations.length > 0) {
-                for (const org of allOrganizations) {
-                    if (org.section_title && org.section_title.trim() !== '' && org.section_title.trim() !== '合作机构') {
-                        sectionTitle = org.section_title.trim();
-                        console.log('公开接口获取到标题:', sectionTitle, '来自组织ID:', org.id);
-                        break;
-                    }
-                }
-            }
         }
-        // 如果启用的组织中有标题，优先使用
-        if (organizations && organizations.length > 0) {
-            for (const org of organizations) {
-                if (org.section_title && org.section_title.trim() !== '' && org.section_title.trim() !== '合作机构') {
-                    sectionTitle = org.section_title.trim();
-                    console.log('公开接口从活跃组织获取到标题:', sectionTitle, '来自组织ID:', org.id);
-                    break;
-                }
-            }
-        }
+        const sectionTitle = pickPartnerSectionTitle(allOrganizations, organizations);
         
         res.status(200).json({ 
             success: true, 
@@ -84,36 +85,13 @@ router.get('/vip', async (req, res) => {
         const organizations = await select('partner_organizations', '*', conditions, null, null, orderBy);
         
         // 获取标题（从该trader_uuid的所有组织中获取，包括不活跃的）
-        let sectionTitle = '合作机构';
+        let allOrganizations = [];
         if (Web_Trader_UUID) {
-            // 查询所有记录（包括不活跃的），按ID倒序，优先获取最新的
-            const allOrganizations = await select('partner_organizations', '*', [
+            allOrganizations = await select('partner_organizations', '*', [
                 { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID }
             ], null, null, { column: 'id', ascending: false });
-            
-            console.log('VIP接口查询到的所有组织:', allOrganizations);
-            
-            // 查找第一个有标题的记录（从最新到最旧）
-            if (allOrganizations && allOrganizations.length > 0) {
-                for (const org of allOrganizations) {
-                    if (org.section_title && org.section_title.trim() !== '' && org.section_title.trim() !== '合作机构') {
-                        sectionTitle = org.section_title.trim();
-                        console.log('VIP接口获取到标题:', sectionTitle, '来自组织ID:', org.id);
-                        break;
-                    }
-                }
-            }
         }
-        // 如果启用的VIP组织中有标题，优先使用
-        if (organizations && organizations.length > 0) {
-            for (const org of organizations) {
-                if (org.section_title && org.section_title.trim() !== '' && org.section_title.trim() !== '合作机构') {
-                    sectionTitle = org.section_title.trim();
-                    console.log('VIP接口从活跃组织获取到标题:', sectionTitle, '来自组织ID:', org.id);
-                    break;
-                }
-            }
-        }
+        const sectionTitle = pickPartnerSectionTitle(allOrganizations, organizations);
         
         res.status(200).json({ 
             success: true, 
@@ -171,7 +149,7 @@ router.get('/admin', authenticateUser, authorizeAdmin, async (req, res) => {
         const total = await count('partner_organizations', conditions);
         
         // 获取标题（从该trader_uuid的所有组织中获取，包括不活跃的）
-        let sectionTitle = '合作机构';
+        let allOrgs = [];
         const titleConditionsForQuery = [];
         if (user.role !== 'superadmin') {
             if (user.trader_uuid) {
@@ -184,21 +162,9 @@ router.get('/admin', authenticateUser, authorizeAdmin, async (req, res) => {
         }
         
         if (titleConditionsForQuery.length > 0) {
-            // 查询所有记录，按ID倒序，优先获取最新的
-            const allOrgs = await select('partner_organizations', '*', titleConditionsForQuery, null, null, { column: 'id', ascending: false });
-            console.log('管理接口查询到的所有组织:', allOrgs);
-            
-            if (allOrgs && allOrgs.length > 0) {
-                // 查找第一个有标题的记录（排除默认值）
-                for (const org of allOrgs) {
-                    if (org.section_title && org.section_title.trim() !== '' && org.section_title.trim() !== '合作机构') {
-                        sectionTitle = org.section_title.trim();
-                        console.log('管理接口获取到标题:', sectionTitle, '来自组织ID:', org.id);
-                        break;
-                    }
-                }
-            }
+            allOrgs = await select('partner_organizations', '*', titleConditionsForQuery, null, null, { column: 'id', ascending: false });
         }
+        const sectionTitle = pickPartnerSectionTitle(allOrgs, organizations);
         
         // 格式化数据
         const formattedOrganizations = organizations.map(org => ({
@@ -325,7 +291,7 @@ router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
             website_url: website_url || null,
             display_order: parseInt(display_order) || 0,
             is_active: !!is_active,
-            section_title: section_title || '合作机构',
+            section_title: normalizePartnerSectionTitle(section_title),
             trader_uuid: traderUUID,
             is_vip: !!is_vip
         };
