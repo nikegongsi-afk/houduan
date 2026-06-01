@@ -62,6 +62,27 @@ function normalize_market(market) {
 }
 
 /**
+ * 从 Polygon snapshot 解析价格（与 Yahoo 等行情更接近）
+ */
+function parse_polygon_snapshot_price(ticker) {
+  if (!ticker) return null;
+
+  const lastTrade = ticker.lastTrade?.p;
+  const dayClose = ticker.day?.c;
+  const prevClose = ticker.prevDay?.c;
+  const minuteClose = ticker.min?.c;
+
+  const candidates = [lastTrade, minuteClose, dayClose, prevClose];
+  for (const value of candidates) {
+    const price = parseFloat(value);
+    if (Number.isFinite(price) && price > 0) {
+      return price;
+    }
+  }
+  return null;
+}
+
+/**
  * 获取实时股票价格
  * @param {string} market - 市场类型 (usa/us/印度等)
  * @param {string} symbol - 股票代码
@@ -72,37 +93,44 @@ async function get_real_time_price(market, symbol) {
   const normalizedMarket = normalize_market(market);
 
   if (normalizedMarket === 'usa') {
-    // 获取美国股票价格
     const api_key = process.env.POLYGON_API_KEY;
     if (!api_key) {
       console.error('POLYGON_API_KEY 未配置');
       return null;
     }
-    
-    // 股票查法兜底：asset_type为stock或未传但symbol像股票代码
-   
-      const url = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
-      try {
-        const resp = await axios.get(url, { timeout: 8000 });
-      
-        const data = resp.data;
-        let price = null;
-        
-        if (data.results && typeof data.results.p !== 'undefined') {
-          price = data.results.p;
-        } else if (data.last && typeof data.last.price !== 'undefined') {
-          price = data.last.price;
-        }
-      
-        if (price !== null && price > 0) {
-          return parseFloat(price);
-        }
-      } catch (error) {
-        console.error(`Error fetching price for ${symbol}:`, error.message);
-        return null;
+
+    // 优先 snapshot（与 AI 选股模块一致，价格更贴近主流行情）
+    const snapshotUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
+    try {
+      const snapshotResp = await axios.get(snapshotUrl, { timeout: 8000 });
+      const snapshotPrice = parse_polygon_snapshot_price(snapshotResp.data?.ticker);
+      if (snapshotPrice !== null) {
+        return snapshotPrice;
       }
-    
-    // 默认返回None
+    } catch (error) {
+      console.error(`Error fetching snapshot for ${symbol}:`, error.message);
+    }
+
+    // 兜底：最后一笔成交价
+    const lastTradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
+    try {
+      const resp = await axios.get(lastTradeUrl, { timeout: 8000 });
+      const data = resp.data;
+      let price = null;
+
+      if (data.results && typeof data.results.p !== 'undefined') {
+        price = data.results.p;
+      } else if (data.last && typeof data.last.price !== 'undefined') {
+        price = data.last.price;
+      }
+
+      if (price !== null && price > 0) {
+        return parseFloat(price);
+      }
+    } catch (error) {
+      console.error(`Error fetching last trade for ${symbol}:`, error.message);
+    }
+
     return null;
   } else if (normalizedMarket === 'india') {
     // 获取印度股票价格
