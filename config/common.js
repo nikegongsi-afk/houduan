@@ -124,8 +124,15 @@ async function get_real_time_price(market, symbol) {
   return null;
 }
 
+function normalizeShareSize(value) {
+  const num = parseFloat(value);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round(num * 100) / 100;
+}
+
 module.exports = {
   get_device_fingerprint,
   get_real_time_price,
-  get_India_price
+  get_India_price,
+  normalizeShareSize,
 };

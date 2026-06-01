@@ -268,7 +268,7 @@ router.post('/upload-trade', async (req, res) => {
       symbol,
       entry_date: new Date(entry_date).toISOString(), // 对应trades表的entry_date字段
       entry_price: parseFloat(entry_price),
-      size: parseInt(size), // size在trades表中是整数类型
+      size: Math.round(parseFloat(size) * 100) / 100,
       current_price: entry_price,
       user_id: user.id,
       username: user.username,

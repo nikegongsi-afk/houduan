@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { select, insert, update,delete:deletedData, count } = require('../config/supabase');
 const { getUserFromSession, checkUserRole, handleError, formatDatetime, authenticateUser, authorizeAdmin } = require('../middleware/auth');
+const { normalizeShareSize } = require('../config/common');
 
 
 // 获取所有交易记录数据（带搜索、分页和筛选）
@@ -99,7 +100,7 @@ router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
       symbol,
       entry_date,
       entry_price,
-      size,
+      size: normalizeShareSize(size),
       exit_date,
       exit_price,
       current_price,
@@ -150,7 +151,7 @@ router.put('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
     if (symbol !== undefined) updateData.symbol = symbol;
     if (entry_date !== undefined) updateData.entry_date = entry_date;
     if (entry_price !== undefined) updateData.entry_price = entry_price;
-    if (size !== undefined) updateData.size = size;
+    if (size !== undefined) updateData.size = normalizeShareSize(size);
     if (exit_date !== undefined) updateData.exit_date = exit_date;
     if (exit_price !== undefined) updateData.exit_price = exit_price;
     if (current_price !== undefined) updateData.current_price = current_price;
