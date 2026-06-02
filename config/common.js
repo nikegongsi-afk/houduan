@@ -88,7 +88,7 @@ function parse_polygon_snapshot_price(ticker) {
  * @param {string} symbol - 股票代码
  * @returns {Promise<number|null>} - 实时价格或null
  */
-async function get_real_time_price(market, symbol) {
+async function get_real_time_price(market, symbol, attempt = 1) {
   symbol = String(symbol).toUpperCase().split(':')[0];
   const normalizedMarket = normalize_market(market);
 
@@ -102,19 +102,23 @@ async function get_real_time_price(market, symbol) {
     // 优先 snapshot（与 AI 选股模块一致，价格更贴近主流行情）
     const snapshotUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
     try {
-      const snapshotResp = await axios.get(snapshotUrl, { timeout: 8000 });
+      const snapshotResp = await axios.get(snapshotUrl, { timeout: 12000 });
       const snapshotPrice = parse_polygon_snapshot_price(snapshotResp.data?.ticker);
       if (snapshotPrice !== null) {
         return snapshotPrice;
       }
     } catch (error) {
-      console.error(`Error fetching snapshot for ${symbol}:`, error.message);
+      console.error(`Error fetching snapshot for ${symbol} (attempt ${attempt}):`, error.message);
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        return get_real_time_price(market, symbol, attempt + 1);
+      }
     }
 
     // 兜底：最后一笔成交价
     const lastTradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
     try {
-      const resp = await axios.get(lastTradeUrl, { timeout: 8000 });
+      const resp = await axios.get(lastTradeUrl, { timeout: 12000 });
       const data = resp.data;
       let price = null;
 
@@ -167,6 +171,46 @@ function shareSizeDbTypeErrorMessage() {
   return '数据库 trades1.size 字段仍为整数类型，无法保存小数。请在 Supabase SQL Editor 执行 scripts/upgrade-trades1-size-decimal.sql';
 }
 
+/**
+ * 为未平仓交易并行拉取实时价，并回写数据库
+ */
+async function refresh_holding_trade_prices(trades, updateFn) {
+  if (!Array.isArray(trades) || trades.length === 0) {
+    return trades;
+  }
+
+  const holdingTrades = trades.filter((trade) => !trade.exit_price && !trade.exit_date);
+  if (holdingTrades.length === 0) {
+    return trades;
+  }
+
+  await Promise.allSettled(
+    holdingTrades.map(async (trade) => {
+      try {
+        const latestPrice = await get_real_time_price(trade.trade_market, trade.symbol);
+        if (latestPrice && latestPrice > 0) {
+          trade.current_price = latestPrice;
+          trade.price_is_live = true;
+          if (typeof updateFn === 'function' && trade.id) {
+            await updateFn(trade.id, latestPrice);
+          }
+          console.log(`✅ 实时获取 ${trade.symbol} 价格: $${latestPrice}`);
+          return;
+        }
+        trade.price_is_live = false;
+        console.warn(
+          `⚠️ ${trade.symbol} 实时价获取失败，使用数据库价格 $${trade.current_price}`
+        );
+      } catch (error) {
+        trade.price_is_live = false;
+        console.error(`❌ 获取 ${trade.symbol} 价格失败:`, error.message);
+      }
+    })
+  );
+
+  return trades;
+}
+
 module.exports = {
   get_device_fingerprint,
   get_real_time_price,
@@ -174,4 +218,5 @@ module.exports = {
   normalizeShareSize,
   isShareSizeDbTypeError,
   shareSizeDbTypeErrorMessage,
+  refresh_holding_trade_prices,
 };

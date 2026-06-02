@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const moment = require('moment');
-const {get_device_fingerprint} = require('../../config/common');
+const { get_device_fingerprint, refresh_holding_trade_prices } = require('../../config/common');
 const { select, insert, update, delete: del, count,Web_Trader_UUID, supabase } = require('../../config/supabase');
 const { getUserFromSession } = require('../../middleware/auth');
 const {get_trader_points_rules,update_user_points} = require('../../config/rulescommon');
@@ -94,21 +94,12 @@ router.get('/index', async (req, res) => {
         console.log('📊 重点交易记录数量:', importantCount);
       }
        
-      // 未平仓交易：始终拉取最新实时价格（避免 current_price=entry_price 时不更新）
-      const { get_real_time_price } = require('../../config/common');
-      for (const trade of trades) {
-        if (!trade.exit_price && !trade.exit_date) {
-          try {
-            const latestPrice = await get_real_time_price(trade.trade_market, trade.symbol);
-            if (latestPrice && latestPrice > 0) {
-              trade.current_price = latestPrice;
-              console.log(`✅ 实时获取 ${trade.symbol} 价格: $${latestPrice}`);
-            }
-          } catch (error) {
-            console.error(`❌ 获取 ${trade.symbol} 价格失败:`, error.message);
-          }
-        }
-      }
+      // 未平仓交易：并行拉取实时价并回写数据库（避免只显示过期的 current_price）
+      await refresh_holding_trade_prices(trades, async (tradeId, latestPrice) => {
+        await update('trades1', { current_price: latestPrice }, [
+          { type: 'eq', column: 'id', value: tradeId },
+        ]);
+      });
        
          // 格式化公告数据
         trades = trades.map(item => {
