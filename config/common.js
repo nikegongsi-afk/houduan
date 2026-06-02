@@ -158,9 +158,20 @@ function normalizeShareSize(value) {
   return Math.round(num * 100) / 100;
 }
 
+function isShareSizeDbTypeError(error) {
+  const message = String(error?.message || error?.details || '');
+  return error?.code === '22P02' && message.includes('integer');
+}
+
+function shareSizeDbTypeErrorMessage() {
+  return '数据库 trades1.size 字段仍为整数类型，无法保存小数。请在 Supabase SQL Editor 执行 scripts/upgrade-trades1-size-decimal.sql';
+}
+
 module.exports = {
   get_device_fingerprint,
   get_real_time_price,
   get_India_price,
   normalizeShareSize,
+  isShareSizeDbTypeError,
+  shareSizeDbTypeErrorMessage,
 };

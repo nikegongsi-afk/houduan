@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { select, insert, update,delete:deletedData, count } = require('../config/supabase');
 const { getUserFromSession, checkUserRole, handleError, formatDatetime, authenticateUser, authorizeAdmin } = require('../middleware/auth');
-const { normalizeShareSize } = require('../config/common');
+const { normalizeShareSize, isShareSizeDbTypeError, shareSizeDbTypeErrorMessage } = require('../config/common');
 
 
 // 获取所有交易记录数据（带搜索、分页和筛选）
@@ -115,6 +115,9 @@ router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
     res.status(201).json({ success: true, data: newTrade });
   } catch (error) {
     console.error('创建交易记录数据失败:', error);
+    if (isShareSizeDbTypeError(error)) {
+      return res.status(400).json({ success: false, error: shareSizeDbTypeErrorMessage(), details: error.message });
+    }
     res.status(500).json({ success: false, error: '创建交易记录数据失败', details: error.message });
   }
 });
@@ -225,6 +228,9 @@ router.put('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
     });
   } catch (error) {
     console.error('更新交易记录数据失败:', error);
+    if (isShareSizeDbTypeError(error)) {
+      return res.status(400).json({ success: false, error: shareSizeDbTypeErrorMessage(), details: error.message });
+    }
     res.status(500).json({ success: false, error: '更新交易记录数据失败', details: error.message });
   }
 });
