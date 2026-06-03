@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const moment = require('moment');
-const { get_device_fingerprint, refresh_holding_trade_prices } = require('../../config/common');
+const { get_device_fingerprint, refresh_holding_trade_prices, get_real_time_price } = require('../../config/common');
 const { select, insert, update, delete: del, count,Web_Trader_UUID, supabase } = require('../../config/supabase');
 const { getUserFromSession } = require('../../middleware/auth');
 const {get_trader_points_rules,update_user_points} = require('../../config/rulescommon');
@@ -614,6 +614,51 @@ router.post('/identify-visit', async (req, res) => {
       message: 'Failed to identify visit user',
       details: error.message,
     });
+  }
+});
+
+// 批量获取持仓实时价格（前端轮询，不拉整页 index）
+router.post('/stock-prices', async (req, res) => {
+  try {
+    const { quotes } = req.body;
+    if (!quotes || !Array.isArray(quotes) || quotes.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'quotes array is required',
+      });
+    }
+
+    const unique = new Map();
+    for (const q of quotes) {
+      const symbol = String(q.symbol || '').trim().toUpperCase();
+      if (!symbol) continue;
+      const trade_market = q.trade_market || 'US';
+      unique.set(`${symbol}|${trade_market}`, { symbol, trade_market });
+    }
+
+    const results = await Promise.allSettled(
+      Array.from(unique.values()).map(async ({ symbol, trade_market }) => {
+        const price = await get_real_time_price(trade_market, symbol);
+        return { symbol, price };
+      })
+    );
+
+    const data = {};
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const { symbol, price } = result.value;
+      if (price != null && price > 0) {
+        data[symbol] = price;
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      data,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    handleError(res, error, 'Failed to fetch stock prices');
   }
 });
 

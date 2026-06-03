@@ -522,21 +522,24 @@ router.post('/stock-prices', async (req, res) => {
     }
 
     const { get_real_time_price } = require('../../config/common');
-    const stockPrices = [];
+    const uniqueSymbols = [...new Set(symbols.map((s) => String(s).trim().toUpperCase()).filter(Boolean))];
 
-    for (const symbol of symbols) {
-      const price = await get_real_time_price(trade_market, symbol);
-      stockPrices.push({
-        symbol,
-        price: price ?? null,
-        change: null,
-        changePercent: null
-      });
-    }
+    const stockPrices = await Promise.all(
+      uniqueSymbols.map(async (symbol) => {
+        const price = await get_real_time_price(trade_market, symbol);
+        return {
+          symbol,
+          price: price ?? null,
+          change: null,
+          changePercent: null,
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
-      data: stockPrices
+      data: stockPrices,
+      updated_at: new Date().toISOString(),
     });
   } catch (error) {
     handleError(res, error, 'Failed to fetch stock prices');
