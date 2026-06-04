@@ -61,8 +61,20 @@ function normalize_market(market) {
   return value;
 }
 
+function get_massive_api_bases() {
+  const bases = [
+    process.env.MASSIVE_API_BASE,
+    'https://api.massive.com',
+    'https://api.polygon.io',
+  ]
+    .filter(Boolean)
+    .map((b) => String(b).replace(/\/$/, ''));
+  return [...new Set(bases)];
+}
+
 function get_polygon_api_keys() {
   const keys = [
+    process.env.MASSIVE_API_KEY,
     process.env.POLYGON_API_KEY,
     process.env.STOCK_REALTIME_API_KEY,
     process.env.POLYGON_API_KEY_FALLBACK,
@@ -73,13 +85,13 @@ function get_polygon_api_keys() {
   return [...new Set(keys)];
 }
 
-async function fetch_us_price_from_polygon(symbol, api_key, attempt = 1) {
-  const snapshotUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
+async function fetch_us_price_from_massive(symbol, api_key, api_base, attempt = 1) {
+  const snapshotUrl = `${api_base}/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
   try {
     const snapshotResp = await axios.get(snapshotUrl, { timeout: 12000 });
     if (snapshotResp.data?.status === 'ERROR') {
       console.error(
-        `Polygon snapshot error for ${symbol}:`,
+        `Massive snapshot error for ${symbol} @ ${api_base}:`,
         snapshotResp.data?.error || 'unknown'
       );
       return null;
@@ -91,14 +103,18 @@ async function fetch_us_price_from_polygon(symbol, api_key, attempt = 1) {
   } catch (error) {
     const status = error.response?.status;
     const msg = error.response?.data?.error || error.message;
-    console.error(`Error fetching snapshot for ${symbol} (attempt ${attempt}):`, status, msg);
+    console.error(
+      `Error fetching snapshot for ${symbol} @ ${api_base} (attempt ${attempt}):`,
+      status,
+      msg
+    );
     if (attempt < 2) {
       await new Promise((resolve) => setTimeout(resolve, 400));
-      return fetch_us_price_from_polygon(symbol, api_key, attempt + 1);
+      return fetch_us_price_from_massive(symbol, api_key, api_base, attempt + 1);
     }
   }
 
-  const lastTradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
+  const lastTradeUrl = `${api_base}/v2/last/trade/${symbol}?apiKey=${api_key}`;
   try {
     const resp = await axios.get(lastTradeUrl, { timeout: 12000 });
     return parse_polygon_last_trade_price(resp.data);
@@ -166,10 +182,13 @@ async function get_real_time_price(market, symbol, attempt = 1) {
       return null;
     }
 
+    const api_bases = get_massive_api_bases();
     for (const api_key of api_keys) {
-      const price = await fetch_us_price_from_polygon(symbol, api_key, attempt);
-      if (price !== null) {
-        return price;
+      for (const api_base of api_bases) {
+        const price = await fetch_us_price_from_massive(symbol, api_key, api_base, attempt);
+        if (price !== null) {
+          return price;
+        }
       }
     }
 
