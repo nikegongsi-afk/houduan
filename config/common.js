@@ -61,18 +61,79 @@ function normalize_market(market) {
   return value;
 }
 
+function get_polygon_api_keys() {
+  const keys = [
+    process.env.POLYGON_API_KEY,
+    process.env.STOCK_REALTIME_API_KEY,
+    process.env.POLYGON_API_KEY_FALLBACK,
+  ]
+    .filter(Boolean)
+    .map((k) => String(k).trim())
+    .filter(Boolean);
+  return [...new Set(keys)];
+}
+
+async function fetch_us_price_from_polygon(symbol, api_key, attempt = 1) {
+  const snapshotUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
+  try {
+    const snapshotResp = await axios.get(snapshotUrl, { timeout: 12000 });
+    if (snapshotResp.data?.status === 'ERROR') {
+      console.error(
+        `Polygon snapshot error for ${symbol}:`,
+        snapshotResp.data?.error || 'unknown'
+      );
+      return null;
+    }
+    const snapshotPrice = parse_polygon_snapshot_price(snapshotResp.data?.ticker);
+    if (snapshotPrice !== null) {
+      return snapshotPrice;
+    }
+  } catch (error) {
+    const status = error.response?.status;
+    const msg = error.response?.data?.error || error.message;
+    console.error(`Error fetching snapshot for ${symbol} (attempt ${attempt}):`, status, msg);
+    if (attempt < 2) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return fetch_us_price_from_polygon(symbol, api_key, attempt + 1);
+    }
+  }
+
+  const lastTradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
+  try {
+    const resp = await axios.get(lastTradeUrl, { timeout: 12000 });
+    return parse_polygon_last_trade_price(resp.data);
+  } catch (error) {
+    console.error(`Error fetching last trade for ${symbol}:`, error.message);
+    return null;
+  }
+}
+
 /**
- * 从 Polygon snapshot 解析价格（与 Yahoo 等行情更接近）
+ * 从 Polygon snapshot 解析价格（优先买卖盘中间价，贴近图表行情）
  */
 function parse_polygon_snapshot_price(ticker) {
   if (!ticker) return null;
 
-  const lastTrade = ticker.lastTrade?.p;
-  const dayClose = ticker.day?.c;
-  const prevClose = ticker.prevDay?.c;
-  const minuteClose = ticker.min?.c;
+  const lastQuote = ticker.lastQuote;
+  if (lastQuote) {
+    const bid = parseFloat(lastQuote.p);
+    const ask = parseFloat(lastQuote.P);
+    if (Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0) {
+      return Math.round(((bid + ask) / 2) * 10000) / 10000;
+    }
+    if (Number.isFinite(ask) && ask > 0) return ask;
+    if (Number.isFinite(bid) && bid > 0) return bid;
+  }
 
-  const candidates = [lastTrade, minuteClose, dayClose, prevClose];
+  const fmv = parseFloat(ticker.fmv);
+  if (Number.isFinite(fmv) && fmv > 0) return fmv;
+
+  const candidates = [
+    ticker.lastTrade?.p,
+    ticker.min?.c,
+    ticker.day?.c,
+    ticker.prevDay?.c,
+  ];
   for (const value of candidates) {
     const price = parseFloat(value);
     if (Number.isFinite(price) && price > 0) {
@@ -80,6 +141,12 @@ function parse_polygon_snapshot_price(ticker) {
     }
   }
   return null;
+}
+
+function parse_polygon_last_trade_price(data) {
+  if (!data) return null;
+  const price = parseFloat(data.results?.p ?? data.last?.price);
+  return Number.isFinite(price) && price > 0 ? price : null;
 }
 
 /**
@@ -93,46 +160,17 @@ async function get_real_time_price(market, symbol, attempt = 1) {
   const normalizedMarket = normalize_market(market);
 
   if (normalizedMarket === 'usa') {
-    const api_key = process.env.POLYGON_API_KEY;
-    if (!api_key) {
-      console.error('POLYGON_API_KEY 未配置');
+    const api_keys = get_polygon_api_keys();
+    if (!api_keys.length) {
+      console.error('POLYGON_API_KEY / STOCK_REALTIME_API_KEY 未配置');
       return null;
     }
 
-    // 优先 snapshot（与 AI 选股模块一致，价格更贴近主流行情）
-    const snapshotUrl = `https://api.polygon.io/v2/snapshot/locale/us/markets/stocks/tickers/${symbol}?apiKey=${api_key}`;
-    try {
-      const snapshotResp = await axios.get(snapshotUrl, { timeout: 12000 });
-      const snapshotPrice = parse_polygon_snapshot_price(snapshotResp.data?.ticker);
-      if (snapshotPrice !== null) {
-        return snapshotPrice;
+    for (const api_key of api_keys) {
+      const price = await fetch_us_price_from_polygon(symbol, api_key, attempt);
+      if (price !== null) {
+        return price;
       }
-    } catch (error) {
-      console.error(`Error fetching snapshot for ${symbol} (attempt ${attempt}):`, error.message);
-      if (attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        return get_real_time_price(market, symbol, attempt + 1);
-      }
-    }
-
-    // 兜底：最后一笔成交价
-    const lastTradeUrl = `https://api.polygon.io/v2/last/trade/${symbol}?apiKey=${api_key}`;
-    try {
-      const resp = await axios.get(lastTradeUrl, { timeout: 12000 });
-      const data = resp.data;
-      let price = null;
-
-      if (data.results && typeof data.results.p !== 'undefined') {
-        price = data.results.p;
-      } else if (data.last && typeof data.last.price !== 'undefined') {
-        price = data.last.price;
-      }
-
-      if (price !== null && price > 0) {
-        return parseFloat(price);
-      }
-    } catch (error) {
-      console.error(`Error fetching last trade for ${symbol}:`, error.message);
     }
 
     return null;
