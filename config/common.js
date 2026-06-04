@@ -94,8 +94,10 @@ async function fetch_us_price_from_massive(symbol, api_key, api_base, attempt = 
       return null;
     }
     const snapshotPrice = parse_polygon_snapshot_price(snapshotResp.data?.ticker);
-    if (snapshotPrice !== null) {
-      return snapshotPrice;
+    const lastTradePrice = await fetch_polygon_last_trade_price(symbol, api_key, api_base);
+    const merged = pick_us_stock_price(snapshotPrice, lastTradePrice);
+    if (merged !== null) {
+      return merged;
     }
   } catch (error) {
     const status = error.response?.status;
@@ -111,6 +113,14 @@ async function fetch_us_price_from_massive(symbol, api_key, api_base, attempt = 
     }
   }
 
+  const lastTradePrice = await fetch_polygon_last_trade_price(symbol, api_key, api_base);
+  if (lastTradePrice !== null) {
+    return lastTradePrice;
+  }
+  return null;
+}
+
+async function fetch_polygon_last_trade_price(symbol, api_key, api_base) {
   const lastTradeUrl = `${api_base}/v2/last/trade/${symbol}?apiKey=${api_key}`;
   try {
     const resp = await axios.get(lastTradeUrl, { timeout: 12000 });
@@ -121,28 +131,45 @@ async function fetch_us_price_from_massive(symbol, api_key, api_base, attempt = 
   }
 }
 
+/** 买卖价差过大时不用中间价（如 BIOA 16/19 会算出 17.5） */
+function is_tight_quote_spread(bid, ask) {
+  const mid = (bid + ask) / 2;
+  const spread = ask - bid;
+  const maxSpread = Math.max(0.03 * mid, 0.15);
+  return spread <= maxSpread;
+}
+
+function pick_us_stock_price(snapshotPrice, lastTradePrice) {
+  // 有最近成交时优先用成交（LIVE）；无成交再用 snapshot 解析结果
+  return lastTradePrice ?? snapshotPrice;
+}
+
 /**
- * 从 Polygon snapshot 解析价格（优先买卖盘中间价，贴近图表行情）
+ * 从 Polygon snapshot 解析价格（最近成交 > 合理价差中间价 > 收盘价）
  */
 function parse_polygon_snapshot_price(ticker) {
   if (!ticker) return null;
+
+  const lastTradePx = parseFloat(ticker.lastTrade?.p);
+  if (Number.isFinite(lastTradePx) && lastTradePx > 0) {
+    return Math.round(lastTradePx * 10000) / 10000;
+  }
 
   const lastQuote = ticker.lastQuote;
   if (lastQuote) {
     const bid = parseFloat(lastQuote.p);
     const ask = parseFloat(lastQuote.P);
     if (Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0) {
-      return Math.round(((bid + ask) / 2) * 10000) / 10000;
+      if (is_tight_quote_spread(bid, ask)) {
+        return Math.round(((bid + ask) / 2) * 10000) / 10000;
+      }
     }
-    if (Number.isFinite(ask) && ask > 0) return ask;
-    if (Number.isFinite(bid) && bid > 0) return bid;
   }
 
   const fmv = parseFloat(ticker.fmv);
   if (Number.isFinite(fmv) && fmv > 0) return fmv;
 
   const candidates = [
-    ticker.lastTrade?.p,
     ticker.min?.c,
     ticker.day?.c,
     ticker.prevDay?.c,
