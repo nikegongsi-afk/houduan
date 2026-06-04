@@ -72,17 +72,14 @@ function get_massive_api_bases() {
   return [...new Set(bases)];
 }
 
-function get_polygon_api_keys() {
-  const keys = [
-    process.env.MASSIVE_API_KEY,
-    process.env.POLYGON_API_KEY,
-    process.env.STOCK_REALTIME_API_KEY,
-    process.env.POLYGON_API_KEY_FALLBACK,
-  ]
-    .filter(Boolean)
-    .map((k) => String(k).trim())
-    .filter(Boolean);
-  return [...new Set(keys)];
+function get_massive_api_key() {
+  const key = (
+    process.env.MASSIVE_API_KEY ||
+    process.env.POLYGON_API_KEY ||
+    process.env.STOCK_REALTIME_API_KEY ||
+    ''
+  ).trim();
+  return key || null;
 }
 
 async function fetch_us_price_from_massive(symbol, api_key, api_base, attempt = 1) {
@@ -176,19 +173,17 @@ async function get_real_time_price(market, symbol, attempt = 1) {
   const normalizedMarket = normalize_market(market);
 
   if (normalizedMarket === 'usa') {
-    const api_keys = get_polygon_api_keys();
-    if (!api_keys.length) {
-      console.error('POLYGON_API_KEY / STOCK_REALTIME_API_KEY 未配置');
+    const api_key = get_massive_api_key();
+    if (!api_key) {
+      console.error('MASSIVE_API_KEY（或 POLYGON_API_KEY）未配置');
       return null;
     }
 
     const api_bases = get_massive_api_bases();
-    for (const api_key of api_keys) {
-      for (const api_base of api_bases) {
-        const price = await fetch_us_price_from_massive(symbol, api_key, api_base, attempt);
-        if (price !== null) {
-          return price;
-        }
+    for (const api_base of api_bases) {
+      const price = await fetch_us_price_from_massive(symbol, api_key, api_base, attempt);
+      if (price !== null) {
+        return price;
       }
     }
 

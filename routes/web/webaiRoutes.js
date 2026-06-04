@@ -87,9 +87,9 @@ function randomSample(array, count) {
 async function getComprehensiveStockData(symbol) {
     try {
         const axios = require('axios');
-        const apiKey = process.env.POLYGON_API_KEY;
+        const apiKey = process.env.MASSIVE_API_KEY || process.env.POLYGON_API_KEY;
         if (!apiKey) {
-            console.log('[WARNING] POLYGON_API_KEY 未配置，使用 fallback 数据');
+            console.log('[WARNING] MASSIVE_API_KEY 未配置，使用 fallback 数据');
             return createFallbackStockData(symbol);
         }
         
