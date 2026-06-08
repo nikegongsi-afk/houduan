@@ -19,8 +19,8 @@ if (process.env.DISABLE_LOCAL_FS !== 'true') {
 const app = express();
 
 app.use(cors({ origin: '*', credentials: false }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '20mb' }));
+app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'your-secret-key',
@@ -150,7 +150,13 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ success: false, message: 'Server Error' });
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: '上传内容过大，请分批导入或减少单次题目数量',
+    });
+  }
+  res.status(500).json({ success: false, message: err.message || 'Server Error' });
 });
 
 module.exports = app;

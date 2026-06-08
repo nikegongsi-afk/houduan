@@ -6,9 +6,12 @@ const supabase = createClient(
     process.env.SUPABASE_KEY || ''
 );
 const Web_Trader_UUID = process.env.Web_Trader_UUID;
+/** 超级管理员全平台共用题目的固定 UUID（question_bank.trader_uuid 为 uuid 类型） */
+const GLOBAL_TRADER_UUID = '00000000-0000-0000-0000-000000000001';
 
 // 导出客户端实例
 exports.supabase = supabase;
+exports.GLOBAL_TRADER_UUID = GLOBAL_TRADER_UUID;
 
 // 统计记录数的函数
 exports.count = async (table, filters = []) => {

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const moment = require('moment');
 const { get_device_fingerprint } = require('../../config/common');
-const { select, insert, update, delete: del, count, Web_Trader_UUID } = require('../../config/supabase');
+const { select, insert, update, delete: del, count, Web_Trader_UUID, GLOBAL_TRADER_UUID } = require('../../config/supabase');
 const { getUserFromSession } = require('../../middleware/auth');
 const { get_trader_points_rules, update_user_points } = require('../../config/rulescommon');
 // 处理错误的辅助函数
@@ -441,11 +441,13 @@ router.get('/random-questions', async (req, res) => {
     const Web_Trader_UUID = req.headers['web-trader-uuid'];
     const user_token = req.headers['session-token'];
 
-    // 构建查询条件
+    // 构建查询条件：本交易员专属题目 + 超级管理员全平台题目
     const conditions = [];
-    // 添加trader_uuid条件
-
-    conditions.push({ type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID });
+    conditions.push({
+      type: 'in',
+      column: 'trader_uuid',
+      value: [Web_Trader_UUID, GLOBAL_TRADER_UUID],
+    });
 
     // 只获取未禁用的题目
     conditions.push({ type: 'eq', column: 'disable', value: false });
