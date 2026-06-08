@@ -46,3 +46,5 @@ CREATE POLICY "page_visits_update" ON page_visits
   FOR UPDATE
   USING (true)
   WITH CHECK (true);
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON page_visits TO anon, authenticated, service_role;

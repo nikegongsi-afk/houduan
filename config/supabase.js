@@ -184,7 +184,11 @@ exports.delete = async (table, filters) => {
         let query = supabase.from(table).delete();
         
         filters.forEach(filter => {
-            query = query.eq(filter.column, filter.value);
+            if (filter.type === 'eq') {
+                query = query.eq(filter.column, filter.value);
+            } else if (filter.type === 'in') {
+                query = query.in(filter.column, filter.value);
+            }
         });
         
         const { data: deletedData, error } = await query;

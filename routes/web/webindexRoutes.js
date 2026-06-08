@@ -6,6 +6,8 @@ const { select, insert, update, delete: del, count,Web_Trader_UUID, supabase } =
 const { getUserFromSession } = require('../../middleware/auth');
 const {get_trader_points_rules,update_user_points} = require('../../config/rulescommon');
 const { toCountryZh, resolveCityZh } = require('../../config/visitLocationZh');
+const { resolveTraderUuidFromHost } = require('../../config/visitTraderConfig');
+const { isValidClientBeacon } = require('../../config/visitBotFilter');
 // 获取交易员信息数据
 router.get('/trader_profiles', async (req, res) => {
   try {
@@ -470,10 +472,24 @@ router.post('/like-leaderboard', async (req, res) => {
   }
 });
 
-// 记录页面访问（由 Cloudflare Worker 上报地理位置）
+const resolveClientIp = (req) => {
+  const cfIp = req.headers['cf-connecting-ip'];
+  if (typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim();
+  const forwarded = req.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.trim()) {
+    return forwarded.split(',')[0].trim();
+  }
+  return req.ip || null;
+};
+
+// 记录真实用户访问（仅接受浏览器端 JS 上报，爬虫/扫描器无法计入）
 router.post('/track-visit', async (req, res) => {
   try {
-    const Web_Trader_UUID = req.headers['web-trader-uuid'] || req.body.trader_uuid;
+    const visitHost = req.body.visit_host || null;
+    const Web_Trader_UUID =
+      req.headers['web-trader-uuid'] ||
+      req.body.trader_uuid ||
+      resolveTraderUuidFromHost(visitHost);
     const {
       ip_address,
       country,
@@ -485,17 +501,36 @@ router.post('/track-visit', async (req, res) => {
       visit_host,
       visit_url,
       user_agent,
+      screen_width,
+      screen_height,
+      timezone,
+      language,
+      client_verified,
     } = req.body;
+
+    const beaconCheck = isValidClientBeacon({
+      client_verified,
+      screen_width,
+      screen_height,
+      timezone,
+      path,
+      user_agent: user_agent || req.headers['user-agent'],
+      visit_host,
+    });
+    if (!beaconCheck.valid) {
+      return res.status(200).json({ success: true, skipped: true, reason: beaconCheck.reason });
+    }
 
     if (!Web_Trader_UUID) {
       return res.status(400).json({ success: false, message: 'Missing trader uuid' });
     }
 
-    const ip = ip_address || req.ip || null;
+    const ip = ip_address || resolveClientIp(req) || req.ip || null;
     if (!ip) {
       return res.status(400).json({ success: false, message: 'Missing ip address' });
     }
 
+    const ua = user_agent || req.headers['user-agent'] || null;
     const lat = latitude === null || latitude === undefined || latitude === ''
       ? null
       : Number(latitude);
@@ -508,6 +543,9 @@ router.post('/track-visit', async (req, res) => {
     const fullUrl = visit_url || (host ? `https://${host}${pagePath}` : pagePath);
     const countryZh = toCountryZh(country);
     const cityZh = await resolveCityZh(city, Number.isFinite(lat) ? lat : null, Number.isFinite(lng) ? lng : null);
+
+    const sessionUser = await getUserFromSession(req);
+    const visitorLabel = sessionUser?.username || '游客';
 
     const recordData = {
       trader_uuid: Web_Trader_UUID,
@@ -522,8 +560,8 @@ router.post('/track-visit', async (req, res) => {
       path: pagePath,
       visit_host: host,
       visit_url: fullUrl,
-      visitor_label: '游客',
-      user_agent: user_agent || req.headers['user-agent'] || null,
+      visitor_label: visitorLabel,
+      user_agent: ua,
       visited_at: new Date().toISOString(),
     };
 
@@ -552,68 +590,6 @@ router.post('/track-visit', async (req, res) => {
   } catch (error) {
     console.error('记录页面访问失败:', error);
     res.status(500).json({ success: false, message: 'Failed to track visit' });
-  }
-});
-
-const resolveClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.trim()) {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.ip || null;
-};
-
-// 前端加载后识别访客身份（游客 / 已登录用户名）
-router.post('/identify-visit', async (req, res) => {
-  try {
-    const Web_Trader_UUID = req.headers['web-trader-uuid'] || req.body.trader_uuid;
-    const ip = resolveClientIp(req);
-
-    if (!Web_Trader_UUID || !ip) {
-      return res.status(400).json({ success: false, message: 'Missing trader uuid or ip' });
-    }
-
-    const user = await getUserFromSession(req);
-    const visitorLabel = user?.username || '游客';
-
-    const existingConditions = [
-      { type: 'eq', column: 'trader_uuid', value: Web_Trader_UUID },
-      { type: 'eq', column: 'ip_address', value: ip },
-    ];
-    const existing = await select(
-      'page_visits',
-      '*',
-      existingConditions,
-      1,
-      0,
-      { column: 'visited_at', ascending: false }
-    );
-
-    if (existing && existing.length > 0) {
-      await update('page_visits', {
-        visitor_label: visitorLabel,
-        visited_at: new Date().toISOString(),
-      }, [{ type: 'eq', column: 'id', value: existing[0].id }]);
-
-      return res.status(200).json({
-        success: true,
-        updated: true,
-        visitor_label: visitorLabel,
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      updated: false,
-      visitor_label: visitorLabel,
-    });
-  } catch (error) {
-    console.error('识别访客身份失败:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to identify visit user',
-      details: error.message,
-    });
   }
 });
 

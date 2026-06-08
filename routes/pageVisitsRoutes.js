@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { select, count } = require('../config/supabase');
-const { getUserFromSession, authenticateUser, authorizeAdmin } = require('../middleware/auth');
+const { authenticateUser, authorizeAdmin } = require('../middleware/auth');
 const { toCountryZh, enrichVisitLocationZh } = require('../config/visitLocationZh');
+const { filterRealVisits } = require('../config/visitBotFilter');
 
 const displayVisit = (visit) => ({
   ...visit,
@@ -28,12 +29,74 @@ const enrichVisitList = async (visits = []) => {
   }));
 };
 
-const buildTraderFilter = async (req) => {
-  const user = await getUserFromSession(req);
-  const conditions = [];
-  if (user.role !== 'superadmin') {
-    conditions.push({ type: 'eq', column: 'trader_uuid', value: user.trader_uuid });
+let traderNameCache = null;
+let traderNameCacheAt = 0;
+const TRADER_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const loadTraderNameMap = async () => {
+  const now = Date.now();
+  if (traderNameCache && now - traderNameCacheAt < TRADER_CACHE_TTL_MS) {
+    return traderNameCache;
   }
+
+  const profiles = await select(
+    'trader_profiles',
+    'trader_uuid, trader_name, website_title',
+    [{ type: 'eq', column: 'isdel', value: false }],
+    null,
+    null,
+    null
+  );
+
+  const map = new Map();
+  (profiles || []).forEach((profile) => {
+    if (!profile.trader_uuid) return;
+    map.set(
+      profile.trader_uuid,
+      profile.trader_name || profile.website_title || profile.trader_uuid
+    );
+  });
+
+  traderNameCache = map;
+  traderNameCacheAt = now;
+  return map;
+};
+
+const enrichWithTraderInfo = async (visits = []) => {
+  const traderMap = await loadTraderNameMap();
+  return visits.map((visit) => ({
+    ...visit,
+    trader_name: traderMap.get(visit.trader_uuid) || visit.visit_host || '未知交易员',
+  }));
+};
+
+const isSuperAdmin = (user) => user?.role === 'superadmin';
+
+/** 交易员管理员只能看自己站点；超级管理员看全部 */
+const buildTraderFilter = (req, queryTraderUuid = '') => {
+  const user = req.user;
+  const conditions = [];
+
+  if (!user) return conditions;
+
+  if (isSuperAdmin(user)) {
+    if (queryTraderUuid) {
+      conditions.push({ type: 'eq', column: 'trader_uuid', value: queryTraderUuid });
+    }
+    return conditions;
+  }
+
+  if (!user.trader_uuid) {
+    // 未绑定交易员的管理员不返回任何数据
+    conditions.push({
+      type: 'eq',
+      column: 'trader_uuid',
+      value: '00000000-0000-0000-0000-000000000000',
+    });
+    return conditions;
+  }
+
+  conditions.push({ type: 'eq', column: 'trader_uuid', value: user.trader_uuid });
   return conditions;
 };
 
@@ -43,22 +106,40 @@ const daysAgoIso = (days) => {
   return date.toISOString();
 };
 
+/** 统计重置时间：只展示此时间之后的访问（用于清空历史后重新统计） */
+const getStatsStartAt = () => {
+  const resetAt = process.env.VISIT_STATS_START_AT;
+  if (!resetAt) return null;
+  const parsed = new Date(resetAt);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+};
+
+const applyTimeFilters = (conditions, days) => {
+  const statsStartAt = getStatsStartAt();
+  const rangeStart = daysAgoIso(days);
+  const effectiveStart = statsStartAt && statsStartAt > rangeStart ? statsStartAt : rangeStart;
+  conditions.push({ type: 'gte', column: 'visited_at', value: effectiveStart });
+  return conditions;
+};
+
 router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
   try {
     const days = Number(req.query.days || 7);
-    const conditions = await buildTraderFilter(req);
-    conditions.push({ type: 'gte', column: 'visited_at', value: daysAgoIso(days) });
+    const conditions = buildTraderFilter(req, req.query.trader_uuid);
+    applyTimeFilters(conditions, days);
 
-    const visits = await select('page_visits', '*', conditions, 5000, 0, {
+    const rawVisits = await select('page_visits', '*', conditions, 10000, 0, {
       column: 'visited_at',
       ascending: false,
     });
+    const visits = filterRealVisits(rawVisits || []);
+    const filteredBotCount = (rawVisits?.length || 0) - visits.length;
 
     const cityMap = new Map();
     const ipSet = new Set();
     const countrySet = new Set();
 
-    (visits || []).forEach((visit) => {
+    visits.forEach((visit) => {
       if (visit.ip_address) ipSet.add(visit.ip_address);
       if (visit.country) countrySet.add(visit.country);
 
@@ -83,14 +164,20 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
       }
     });
 
+    const recent = await enrichWithTraderInfo(await enrichVisitList(visits.slice(0, 20)));
+
     res.status(200).json({
       success: true,
       data: {
-        totalVisits: visits?.length || 0,
+        totalVisits: ipSet.size,
         uniqueIps: ipSet.size,
         uniqueCountries: countrySet.size,
         cities: Array.from(cityMap.values()).sort((a, b) => b.count - a.count),
-        recent: await enrichVisitList((visits || []).slice(0, 20)),
+        recent,
+        filteredBotCount,
+        isSuperAdmin: isSuperAdmin(req.user),
+        traderUuid: isSuperAdmin(req.user) ? null : req.user.trader_uuid,
+        statsStartAt: getStatsStartAt(),
       },
     });
   } catch (error) {
@@ -101,30 +188,37 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
 
 router.get('/', authenticateUser, authorizeAdmin, async (req, res) => {
   try {
-    const { offset = 0, limit = 20, days = 7, search = '' } = req.query;
-    const conditions = await buildTraderFilter(req);
-    conditions.push({ type: 'gte', column: 'visited_at', value: daysAgoIso(days) });
+    const { offset = 0, limit = 20, days = 7, search = '', trader_uuid: queryTraderUuid = '' } = req.query;
+    const conditions = buildTraderFilter(req, queryTraderUuid);
+    applyTimeFilters(conditions, days);
 
     if (search) {
       conditions.push({ type: 'ilike', column: 'ip_address', value: `%${search}%` });
     }
 
-    const orderBy = { column: 'visited_at', ascending: false };
-    const visits = await select(
+    const rawVisits = await select(
       'page_visits',
       '*',
       conditions,
-      Number(limit),
-      Number(offset),
-      orderBy
+      10000,
+      0,
+      { column: 'visited_at', ascending: false }
     );
-    const total = await count('page_visits', conditions);
+    const realVisits = filterRealVisits(rawVisits || []);
+    const pageOffset = Number(offset);
+    const pageLimit = Number(limit);
+    const pagedVisits = realVisits.slice(pageOffset, pageOffset + pageLimit);
+    const total = realVisits.length;
+
+    const enriched = await enrichWithTraderInfo(await enrichVisitList(pagedVisits));
 
     res.status(200).json({
       success: true,
-      data: await enrichVisitList(visits || []),
-      total: total || 0,
-      pages: Math.ceil((total || 0) / Number(limit)),
+      data: enriched,
+      total,
+      pages: Math.ceil(total / pageLimit),
+      filteredBotCount: (rawVisits?.length || 0) - total,
+      isSuperAdmin: isSuperAdmin(req.user),
     });
   } catch (error) {
     console.error('获取访问记录失败:', error);
