@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS page_visits (
   visitor_label TEXT DEFAULT '游客',
   user_id BIGINT,
   user_agent TEXT,
+  visit_count INTEGER NOT NULL DEFAULT 1,
+  first_visited_at TIMESTAMPTZ,
   visited_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

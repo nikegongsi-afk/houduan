@@ -547,6 +547,7 @@ router.post('/track-visit', async (req, res) => {
     const sessionUser = await getUserFromSession(req);
     const visitorLabel = sessionUser?.username || '游客';
 
+    const now = new Date().toISOString();
     const recordData = {
       trader_uuid: Web_Trader_UUID,
       ip_address: ip,
@@ -562,7 +563,7 @@ router.post('/track-visit', async (req, res) => {
       visit_url: fullUrl,
       visitor_label: visitorLabel,
       user_agent: ua,
-      visited_at: new Date().toISOString(),
+      visited_at: now,
     };
 
     const existingConditions = [
@@ -579,14 +580,28 @@ router.post('/track-visit', async (req, res) => {
     );
 
     if (existing && existing.length > 0) {
-      await update('page_visits', recordData, [
-        { type: 'eq', column: 'id', value: existing[0].id },
+      const prev = existing[0];
+      const prevCount = Number(prev.visit_count) || 1;
+      await update('page_visits', {
+        ...recordData,
+        visit_count: prevCount + 1,
+        first_visited_at: prev.first_visited_at || prev.visited_at || now,
+      }, [
+        { type: 'eq', column: 'id', value: prev.id },
       ]);
-      return res.status(200).json({ success: true, updated: true });
+      return res.status(200).json({
+        success: true,
+        updated: true,
+        visit_count: prevCount + 1,
+      });
     }
 
-    await insert('page_visits', recordData);
-    res.status(201).json({ success: true, created: true });
+    await insert('page_visits', {
+      ...recordData,
+      visit_count: 1,
+      first_visited_at: now,
+    });
+    res.status(201).json({ success: true, created: true, visit_count: 1 });
   } catch (error) {
     console.error('记录页面访问失败:', error);
     res.status(500).json({ success: false, message: 'Failed to track visit' });

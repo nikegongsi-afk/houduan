@@ -8,6 +8,8 @@ const { filterRealVisits } = require('../config/visitBotFilter');
 const displayVisit = (visit) => ({
   ...visit,
   visitor_label: visit.visitor_label || '游客',
+  visit_count: Number(visit.visit_count) > 0 ? Number(visit.visit_count) : 1,
+  first_visited_at: visit.first_visited_at || visit.visited_at,
   country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
   city: visit.city_zh || visit.city || '',
 });
@@ -138,19 +140,22 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
     const cityMap = new Map();
     const ipSet = new Set();
     const countrySet = new Set();
+    let totalVisitCount = 0;
 
     visits.forEach((visit) => {
       if (visit.ip_address) ipSet.add(visit.ip_address);
       if (visit.country) countrySet.add(visit.country);
+      totalVisitCount += Number(visit.visit_count) > 0 ? Number(visit.visit_count) : 1;
 
       const lat = Number(visit.latitude);
       const lng = Number(visit.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
 
+      const visitTimes = Number(visit.visit_count) > 0 ? Number(visit.visit_count) : 1;
       const key = `${visit.city_zh || visit.city || 'Unknown'}|${visit.country_zh || visit.country || ''}|${lat}|${lng}`;
       const existing = cityMap.get(key);
       if (existing) {
-        existing.count += 1;
+        existing.count += visitTimes;
         existing.lastVisitedAt = visit.visited_at;
       } else {
         cityMap.set(key, {
@@ -158,7 +163,7 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
           country: visit.country_zh || toCountryZh(visit.country) || visit.country || '',
           latitude: lat,
           longitude: lng,
-          count: 1,
+          count: visitTimes,
           lastVisitedAt: visit.visited_at,
         });
       }
@@ -171,6 +176,7 @@ router.get('/summary', authenticateUser, authorizeAdmin, async (req, res) => {
       data: {
         totalVisits: ipSet.size,
         uniqueIps: ipSet.size,
+        totalVisitCount,
         uniqueCountries: countrySet.size,
         cities: Array.from(cityMap.values()).sort((a, b) => b.count - a.count),
         recent,
