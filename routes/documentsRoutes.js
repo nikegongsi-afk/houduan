@@ -3,6 +3,13 @@ const router = express.Router();
 const { select, insert, update,delete:deleteData, count } = require('../config/supabase');
 const { getUserFromSession, checkUserRole, handleError, formatDatetime, authenticateUser, authorizeAdmin } = require('../middleware/auth');
 
+const parseLastUpdate = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return new Date();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
 
 // 获取所有文档数据（带搜索、分页和筛选）
 router.get('/', authenticateUser, authorizeAdmin, async (req, res) => {
@@ -72,7 +79,7 @@ router.get('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
 // 创建新的文档数据
 router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
   try {
-    const { title, description, file_url, file_type, ispublic } = req.body;
+    const { title, description, file_url, file_type, ispublic, last_update } = req.body;
 
     if (!title || !file_url) {
       return res.status(400).json({ success: false, error: '缺少必要的字段' });
@@ -87,7 +94,8 @@ router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
       file_type,
       views: 0,
       trader_uuid: user && user.trader_uuid ? user.trader_uuid : null,
-      ispublic: ispublic !== undefined ? ispublic : 1
+      ispublic: ispublic !== undefined ? ispublic : 1,
+      last_update: parseLastUpdate(last_update),
     });
     
     res.status(201).json({ success: true, message: '新增成功', data: newDocument });
@@ -101,7 +109,7 @@ router.post('/', authenticateUser, authorizeAdmin, async (req, res) => {
 router.put('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, description, file_url, file_type, ispublic } = req.body;
+    const { title, description, file_url, file_type, ispublic, last_update } = req.body;
 
     const existingDocument = await select('documents', '*', [{'type':'eq','column':'id','value':id}]);
     if (!existingDocument || existingDocument.length === 0) {
@@ -114,7 +122,7 @@ router.put('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
       return res.status(403).json({ success: false, error: '没有权限更新此文档' });
     }
     
-    const updateData = { last_update: new Date() };
+    const updateData = { last_update: parseLastUpdate(last_update) };
     if (title !== undefined) updateData.title = title;
     if (description !== undefined) updateData.description = description;
     if (file_url !== undefined) updateData.file_url = file_url;
