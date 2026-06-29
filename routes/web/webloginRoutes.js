@@ -89,6 +89,69 @@ function sanitizeUsername(value) {
     return cleaned || 'user';
 }
 
+function isProfileComplete(user) {
+    const username = String(user?.username || '').trim();
+    const phone = String(user?.phonenumber || '').trim();
+    return username.length > 0 && phone.length > 0;
+}
+
+function validatePhoneNumber(phone) {
+    const trimmed = String(phone || '').trim();
+    if (!trimmed) {
+        return { valid: false, message: 'Phone number is required' };
+    }
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length < 8 || digits.length > 15) {
+        return { valid: false, message: 'Please enter a valid phone number' };
+    }
+    return { valid: true, value: trimmed };
+}
+
+function validateUsername(username) {
+    const trimmed = String(username || '').trim();
+    if (!trimmed) {
+        return { valid: false, message: 'Username is required' };
+    }
+    if (!/^[a-zA-Z0-9_]{3,20}$/.test(trimmed)) {
+        return { valid: false, message: 'Username must be 3-20 characters (letters, numbers, underscore)' };
+    }
+    return { valid: true, value: trimmed };
+}
+
+async function isUsernameAvailable(username, traderUuid, excludeUserId = null) {
+    const existingUsers = await select('users', 'id', [
+        { type: 'eq', column: 'username', value: username },
+        { type: 'eq', column: 'trader_uuid', value: traderUuid }
+    ]);
+
+    if (!existingUsers || existingUsers.length === 0) {
+        return true;
+    }
+
+    if (excludeUserId && existingUsers.length === 1 && existingUsers[0].id === excludeUserId) {
+        return true;
+    }
+
+    return false;
+}
+
+function buildNeedsProfileResponse(email, name, picture, user = null) {
+    const suggestedUsername = user?.username
+        ? String(user.username).trim()
+        : sanitizeUsername(String(email || '').split('@')[0]);
+
+    return {
+        success: false,
+        needs_profile: true,
+        message: 'Please complete your profile to continue',
+        email,
+        name: name || '',
+        picture: picture || '',
+        suggested_username: suggestedUsername,
+        phonenumber: user?.phonenumber ? String(user.phonenumber).trim() : ''
+    };
+}
+
 async function generateUniqueUsername(email, traderUuid) {
     const localPart = String(email || '').split('@')[0];
     const base = sanitizeUsername(localPart);
@@ -153,7 +216,7 @@ router.post('/', async (req, res) => {
 // Google 邮箱登录
 router.post('/google', async (req, res) => {
     try {
-        const { credential } = req.body;
+        const { credential, username, phonenumber } = req.body;
         const traderUuid = req.headers['web-trader-uuid'];
         const googleClientId = process.env.GOOGLE_CLIENT_ID;
 
@@ -175,6 +238,9 @@ router.post('/google', async (req, res) => {
         }
 
         const { sub, email, name, picture } = googleProfile;
+        const usernameValidation = username ? validateUsername(username) : { valid: false };
+        const phoneValidation = phonenumber ? validatePhoneNumber(phonenumber) : { valid: false };
+
         let users = await select('users', '*', [
             { type: 'eq', column: 'email', value: email },
             { type: 'eq', column: 'trader_uuid', value: traderUuid }
@@ -186,7 +252,35 @@ router.post('/google', async (req, res) => {
         if (users && users.length > 0) {
             user = users[0];
 
-            if (picture && !user.avatar_url) {
+            if (!isProfileComplete(user)) {
+                if (!usernameValidation.valid || !phoneValidation.valid) {
+                    return res.status(200).json(buildNeedsProfileResponse(email, name, picture, user));
+                }
+
+                if (user.username !== usernameValidation.value) {
+                    const available = await isUsernameAvailable(usernameValidation.value, traderUuid, user.id);
+                    if (!available) {
+                        return res.status(400).json({ success: false, message: 'The username has already been used!' });
+                    }
+                }
+
+                await update('users', {
+                    username: usernameValidation.value,
+                    phonenumber: phoneValidation.value,
+                    realname: user.realname || name,
+                    avatar_url: user.avatar_url || picture || '',
+                    updated_at: new Date().toISOString()
+                }, [
+                    { type: 'eq', column: 'id', value: user.id }
+                ]);
+
+                user.username = usernameValidation.value;
+                user.phonenumber = phoneValidation.value;
+                if (picture && !user.avatar_url) {
+                    user.avatar_url = picture;
+                }
+                loginMessage = 'Profile completed successfully';
+            } else if (picture && !user.avatar_url) {
                 await update('users', {
                     avatar_url: picture,
                     updated_at: new Date().toISOString()
@@ -207,14 +301,22 @@ router.post('/google', async (req, res) => {
                 });
             }
 
+            if (!usernameValidation.valid || !phoneValidation.valid) {
+                return res.status(200).json(buildNeedsProfileResponse(email, name, picture));
+            }
+
+            const available = await isUsernameAvailable(usernameValidation.value, traderUuid);
+            if (!available) {
+                return res.status(400).json({ success: false, message: 'The username has already been used!' });
+            }
+
             const pointsRules = await get_trader_points_rules(req);
-            const username = await generateUniqueUsername(email, traderUuid);
             const userData = {
-                username,
+                username: usernameValidation.value,
                 password_hash: `google:${sub}`,
                 realname: name,
                 email,
-                phonenumber: '',
+                phonenumber: phoneValidation.value,
                 role: 'user',
                 status: 'active',
                 membership_points: 0,
