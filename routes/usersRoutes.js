@@ -258,6 +258,7 @@ router.put('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
 router.delete('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
     try {
         const { id } = req.params;
+        const user = req.user;
         
         // 检查用户是否存在
         const existingUsers = await select('users', '*', [
@@ -267,12 +268,20 @@ router.delete('/:id', authenticateUser, authorizeAdmin, async (req, res) => {
         if (!existingUsers || existingUsers.length === 0) {
             return res.status(404).json({ success: false, message: '用户不存在' });
         }
-         const user = await getUserFromSession(req);
-        // 删除用户
-        await update('users', { isdel: true }, [
-            { type: 'eq', column: 'id', value: id },
-             { type: 'eq', column: 'trader_uuid', value: user.trader_uuid }
-        ]);
+
+        const filters = [{ type: 'eq', column: 'id', value: id }];
+        if (user.role !== 'superadmin') {
+            if (!user.trader_uuid) {
+                return res.status(403).json({ success: false, message: '当前管理员未绑定交易员UUID，无法删除用户' });
+            }
+            filters.push({ type: 'eq', column: 'trader_uuid', value: user.trader_uuid });
+        }
+
+        // 软删除用户；超级管理员可跨站点删除，普通管理员只能删除本交易员UUID下的用户。
+        const deletedUsers = await update('users', { isdel: true, updated_at: new Date().toISOString() }, filters);
+        if (!deletedUsers || deletedUsers.length === 0) {
+            return res.status(403).json({ success: false, message: '无权删除该用户或用户不属于当前站点' });
+        }
         
         res.status(200).json({ success: true, message: '用户删除成功' });
     } catch (error) {

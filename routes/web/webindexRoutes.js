@@ -150,6 +150,29 @@ router.get('/index', async (req, res) => {
                 status: status,
             };
         });
+
+      const tradeStats = trades.reduce((stats, trade) => {
+        const amount = parseFloat(trade.Amount);
+        if (!Number.isFinite(amount)) {
+          return stats;
+        }
+
+        stats.total += 1;
+        if (amount > 0) {
+          stats.profitable += 1;
+        } else if (amount < 0) {
+          stats.losing += 1;
+        } else {
+          stats.breakeven += 1;
+        }
+        return stats;
+      }, { total: 0, profitable: 0, losing: 0, breakeven: 0 });
+
+      const calculatedWinRate = tradeStats.total > 0
+        ? Math.round((tradeStats.profitable / tradeStats.total) * 100)
+        : 0;
+      users[0].win_rate = calculatedWinRate;
+      users[0].win_rate_stats = tradeStats;
       
       // 在后端进行排序：重点交易置顶
       trades = trades.sort((a, b) => {
