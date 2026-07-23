@@ -8,6 +8,8 @@ const TRADER_UUID_BY_HOST = {
   'www.allenklee.com': 'ef59ab89-c338-4b64-a988-9a19446df14b',
   'ben-snide.com': 'fe9af579-c264-46aa-afc9-4ebfeda17d06',
   'www.ben-snide.com': 'fe9af579-c264-46aa-afc9-4ebfeda17d06',
+  'jeffreycurrie.com': 'a1875d26-0b98-4a68-b7fc-e8e8f5fc0a8b',
+  'www.jeffreycurrie.com': 'a1875d26-0b98-4a68-b7fc-e8e8f5fc0a8b',
 };
 
 const resolveTraderUuidFromHost = (host) => {
