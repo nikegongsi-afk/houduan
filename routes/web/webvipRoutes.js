@@ -10,6 +10,18 @@ const handleError = (res, error, message) => {
   console.error(message + ':', error);
   res.status(500).json({ success: false, message, details: error.message });
 };
+
+/** 交易日历日：避免 YYYY-MM-DD 被当成 UTC 零点导致显示少一天 */
+function normalizeTradeDateIso(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return `${raw}T16:00:00.000Z`;
+  }
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
 // 获取会员信息
 router.get('/userinfo', async (req, res) => {
   try {
@@ -266,7 +278,7 @@ router.post('/upload-trade', async (req, res) => {
     // 创建交易记录到trades表，按照trades表结构
     const newTrade = await insert('trades', {
       symbol,
-      entry_date: new Date(entry_date).toISOString(), // 对应trades表的entry_date字段
+      entry_date: normalizeTradeDateIso(entry_date),
       entry_price: parseFloat(entry_price),
       size: Math.round(parseFloat(size) * 100) / 100,
       current_price: entry_price,
@@ -351,7 +363,7 @@ router.post('/close-trades', async (req, res) => {
       const updateResult = await update('trades', {
         image_url: image_url,
         exit_price: exitPriceFloat,
-        exit_date: new Date(exit_date).toISOString(),
+        exit_date: normalizeTradeDateIso(exit_date),
         profit: Math.round(profit * 100) / 100, // 保留两位小数
         exchange_rate: exchange_rate,
         updated_at: new Date().toISOString()
