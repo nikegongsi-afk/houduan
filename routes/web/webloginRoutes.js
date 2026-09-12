@@ -197,6 +197,10 @@ router.post('/', async (req, res) => {
         }
         
         const user = users[0];
+
+        if (user.isdel) {
+            return res.status(200).json({ success: false, message: 'Account has been deleted and cannot log in' });
+        }
         
         if (user.status !== 'active') {
             return res.status(200).json({ success: false, message: 'Admin account is not activated or has been disabled' });
@@ -251,6 +255,10 @@ router.post('/google', async (req, res) => {
 
         if (users && users.length > 0) {
             user = users[0];
+
+            if (user.isdel) {
+                return res.status(401).json({ success: false, message: 'Account has been deleted and cannot log in' });
+            }
 
             if (!isProfileComplete(user)) {
                 if (!usernameValidation.valid || !phoneValidation.valid) {

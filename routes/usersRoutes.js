@@ -311,6 +311,11 @@ router.post('/login', async (req, res) => {
         }
         
         const user = users[0];
+
+        // 已软删除账号禁止登录
+        if (user.isdel) {
+            return res.status(401).json({ success: false, message: '用户账号已被删除，无法登录' });
+        }
         
         // 检查用户状态
         if (user.status !== 'active') {
@@ -415,6 +420,11 @@ router.post('/adminlogin', async (req, res) => {
         }
         
         const user = users[0];
+
+        // 已软删除账号禁止登录
+        if (user.isdel) {
+            return res.status(401).json({ success: false, message: '管理员账号已被删除，无法登录' });
+        }
         
         // 检查用户状态
         if (user.status !== 'active') {
